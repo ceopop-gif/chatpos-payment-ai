@@ -755,17 +755,11 @@ export default function HomePage() {
     return true;
   };
 
-  const downloadQrBlob = (pngBlob: Blob) => {
-    const pngUrl = URL.createObjectURL(pngBlob);
-    const downloadLink = document.createElement("a");
-    downloadLink.href = pngUrl;
-    downloadLink.download = qrFileName();
-    downloadLink.rel = "noopener";
-    document.body.appendChild(downloadLink);
-    downloadLink.click();
-    downloadLink.remove();
-    window.setTimeout(() => URL.revokeObjectURL(pngUrl), 1500);
-    toast.success("บันทึกรูป QR ลงเครื่องแล้ว");
+  const openQrImageFullScreen = () => {
+    const previewUrl = qrPreviewUrlRef.current;
+    if (!previewUrl) return;
+    const opened = window.open(previewUrl, "_blank");
+    if (!opened) window.location.assign(previewUrl);
   };
 
   const saveQrImage = async () => {
@@ -778,15 +772,8 @@ export default function HomePage() {
         qrPngBlobRef.current = pngBlob;
       }
 
-      if (isLineEnvironment()) {
-        if (!shareQrBlob(pngBlob)) {
-          showQrSavePreview(pngBlob);
-          toast.info("แตะรูป QR ค้าง 1–2 วินาที แล้วเลือกบันทึกรูปภาพ");
-        }
-        return;
-      }
-
-      downloadQrBlob(pngBlob);
+      showQrSavePreview(pngBlob);
+      toast.success("สร้างรูป QR แล้ว เลือกวิธีบันทึกได้เลย");
     } catch {
       toast.error("บันทึกรูป QR ไม่สำเร็จ กรุณาลองอีกครั้ง");
     }
@@ -1194,14 +1181,22 @@ export default function HomePage() {
                   <div className="qr-save-preview-card">
                     <button type="button" className="qr-save-preview-close" onClick={closeQrSavePreview} aria-label="ปิด">×</button>
                     <div className="qr-save-preview-icon"><ArrowDownToLine /></div>
-                    <h3>บันทึกรูป QR ใน LINE</h3>
-                    <p>แตะรูป QR ค้างไว้ 1–2 วินาที<br />แล้วเลือก “ดาวน์โหลดรูปภาพ” หรือ “บันทึกรูปภาพ”</p>
-                    <img src={qrSavePreview} alt="รูป QR สำหรับบันทึกลงมือถือ" draggable={false} />
+                    <h3>รูป QR พร้อมบันทึก</h3>
+                    <p>เลือกปุ่มด้านล่าง หากเปิดใน LINE แนะนำให้กด “เปิดรูปเต็มจอ” แล้วแตะรูปค้างเพื่อบันทึก</p>
+                    <a className="qr-save-image-link" href={qrSavePreview} download={qrFileName()} aria-label="ดาวน์โหลดรูป QR">
+                      <img src={qrSavePreview} alt="รูป QR สำหรับบันทึกลงมือถือ" />
+                    </a>
+                    <a className="qr-save-download-button" href={qrSavePreview} download={qrFileName()}>
+                      <ArrowDownToLine /> ดาวน์โหลดรูป QR
+                    </a>
+                    <button type="button" className="qr-save-full-button" onClick={openQrImageFullScreen}>
+                      <QrCode /> เปิดรูป QR เต็มจอ
+                    </button>
                     <button type="button" className="qr-save-share-button" onClick={() => {
                       const pngBlob = qrPngBlobRef.current;
-                      if (pngBlob && !shareQrBlob(pngBlob)) toast.info("เครื่องนี้ไม่รองรับเมนูแชร์ กรุณาแตะรูปค้างเพื่อบันทึก");
+                      if (pngBlob && !shareQrBlob(pngBlob)) toast.info("เครื่องนี้ไม่รองรับเมนูแชร์ กรุณากดเปิดรูปเต็มจอแล้วแตะรูปค้าง");
                     }}>
-                      <ExternalLink /> แชร์หรือบันทึกผ่านมือถือ
+                      <ExternalLink /> แชร์ผ่านมือถือ
                     </button>
                     <button type="button" className="qr-save-back-button" onClick={closeQrSavePreview}>กลับหน้าสแกนจ่าย</button>
                   </div>
