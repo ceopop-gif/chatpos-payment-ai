@@ -221,6 +221,45 @@ function lineVoiceClipUrl(clip: string): string {
   return `/audio/th/${clip}.mp3?v=7`;
 }
 
+async function qrSvgToPngBlob(qrSvg: SVGSVGElement): Promise<Blob> {
+  const clonedSvg = qrSvg.cloneNode(true) as SVGSVGElement;
+  clonedSvg.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+  clonedSvg.setAttribute("width", "1024");
+  clonedSvg.setAttribute("height", "1024");
+  clonedSvg.setAttribute("viewBox", qrSvg.getAttribute("viewBox") || "0 0 24 24");
+  clonedSvg.setAttribute("color", "#020706");
+  clonedSvg.setAttribute("stroke", "#020706");
+
+  const svgMarkup = new XMLSerializer().serializeToString(clonedSvg);
+  const svgBlob = new Blob([svgMarkup], { type: "image/svg+xml;charset=utf-8" });
+  const svgUrl = URL.createObjectURL(svgBlob);
+  const image = new Image();
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      image.onload = () => resolve();
+      image.onerror = () => reject(new Error("โหลดรูป QR ไม่สำเร็จ"));
+      image.src = svgUrl;
+    });
+
+    const canvas = document.createElement("canvas");
+    canvas.width = 1200;
+    canvas.height = 1200;
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("อุปกรณ์ไม่รองรับการสร้างรูป");
+
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.drawImage(image, 100, 100, 1000, 1000);
+
+    return await new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error("สร้างไฟล์ PNG ไม่สำเร็จ")), "image/png");
+    });
+  } finally {
+    URL.revokeObjectURL(svgUrl);
+  }
+}
+
 function MethodMark({ method, size = "md" }: { method: PaymentMethod; size?: "sm" | "md" | "lg" }) {
   const Icon = methods[method].icon;
   return (
@@ -309,12 +348,15 @@ export default function HomePage() {
   const [voiceStatus, setVoiceStatus] = useState<"idle" | "ready" | "speaking" | "unsupported" | "error">("idle");
   const [lineAudioMode, setLineAudioMode] = useState(false);
   const [lineAudioUnlocked, setLineAudioUnlocked] = useState(false);
+  const [qrSavePreview, setQrSavePreview] = useState<string | null>(null);
   const speechRunRef = useRef(0);
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const spokenAudioRef = useRef<HTMLAudioElement | null>(null);
   const voiceFailureNotifiedRef = useRef(false);
   const qrImageRef = useRef<HTMLDivElement | null>(null);
+  const qrPngBlobRef = useRef<Blob | null>(null);
+  const qrPreviewUrlRef = useRef<string | null>(null);
 
   const amount = Number(amountText || 0);
   const cartTotal = useMemo(() => cart.reduce((sum, item) => sum + item.price * item.qty, 0), [cart]);
@@ -343,6 +385,29 @@ export default function HomePage() {
         spokenAudioRef.current = null;
       }
     };
+  }, []);
+
+  useEffect(() => {
+    if (!dialogOpen || dialogStage !== "ready") return;
+    let active = true;
+    const timer = window.setTimeout(() => {
+      const qrSvg = qrImageRef.current?.querySelector("svg");
+      if (!qrSvg) return;
+      void qrSvgToPngBlob(qrSvg).then((blob) => {
+        if (active) qrPngBlobRef.current = blob;
+      }).catch(() => {
+        // The Save button retries generation if preloading is not ready.
+      });
+    }, 120);
+
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [dialogOpen, dialogStage, amountText]);
+
+  useEffect(() => () => {
+    if (qrPreviewUrlRef.current) URL.revokeObjectURL(qrPreviewUrlRef.current);
   }, []);
 
   const cancelSpeech = () => {
@@ -653,70 +718,76 @@ export default function HomePage() {
     }, 1200);
   };
 
-  const saveQrImage = async () => {
-    const qrSvg = qrImageRef.current?.querySelector("svg");
-    if (!qrSvg) {
-      toast.error("ยังไม่พบรูป QR กรุณาลองอีกครั้ง");
-      return;
+  const qrFileName = () => {
+    const amountLabel = money.format(Number(amountText)).replace(/[^\d]/g, "") || "payment";
+    return `ChatPOS-QR-${amountLabel}.png`;
+  };
+
+  const closeQrSavePreview = () => {
+    setQrSavePreview(null);
+    if (qrPreviewUrlRef.current) {
+      URL.revokeObjectURL(qrPreviewUrlRef.current);
+      qrPreviewUrlRef.current = null;
     }
+  };
 
+  const showQrSavePreview = (pngBlob: Blob) => {
+    if (qrPreviewUrlRef.current) URL.revokeObjectURL(qrPreviewUrlRef.current);
+    const previewUrl = URL.createObjectURL(pngBlob);
+    qrPreviewUrlRef.current = previewUrl;
+    setQrSavePreview(previewUrl);
+  };
+
+  const shareQrBlob = (pngBlob: Blob): boolean => {
+    if (!navigator.share) return false;
+    const file = new File([pngBlob], qrFileName(), { type: "image/png" });
+    const shareData = { files: [file], title: "ChatPOS QR Payment", text: `QR รับชำระ ฿${money.format(Number(amountText))}` };
+    if (navigator.canShare && !navigator.canShare(shareData)) return false;
+
+    const shareResult = navigator.share(shareData);
+    void shareResult.then(() => {
+      toast.success("เปิดเมนูแชร์หรือบันทึกรูป QR แล้ว");
+    }).catch((error) => {
+      if (error instanceof DOMException && error.name === "AbortError") return;
+      showQrSavePreview(pngBlob);
+      toast.info("LINE ไม่เปิดเมนูบันทึก กรุณาแตะรูปค้างเพื่อบันทึก");
+    });
+    return true;
+  };
+
+  const downloadQrBlob = (pngBlob: Blob) => {
+    const pngUrl = URL.createObjectURL(pngBlob);
+    const downloadLink = document.createElement("a");
+    downloadLink.href = pngUrl;
+    downloadLink.download = qrFileName();
+    downloadLink.rel = "noopener";
+    document.body.appendChild(downloadLink);
+    downloadLink.click();
+    downloadLink.remove();
+    window.setTimeout(() => URL.revokeObjectURL(pngUrl), 1500);
+    toast.success("บันทึกรูป QR ลงเครื่องแล้ว");
+  };
+
+  const saveQrImage = async () => {
     try {
-      const clonedSvg = qrSvg.cloneNode(true) as SVGSVGElement;
-      clonedSvg.setAttribute("xmlns", "http://www.w3.org/2000/svg");
-      clonedSvg.setAttribute("width", "1024");
-      clonedSvg.setAttribute("height", "1024");
-      clonedSvg.setAttribute("viewBox", qrSvg.getAttribute("viewBox") || "0 0 24 24");
-      clonedSvg.setAttribute("color", "#020706");
-      clonedSvg.setAttribute("stroke", "#020706");
+      let pngBlob = qrPngBlobRef.current;
+      if (!pngBlob) {
+        const qrSvg = qrImageRef.current?.querySelector("svg");
+        if (!qrSvg) throw new Error("ยังไม่พบรูป QR");
+        pngBlob = await qrSvgToPngBlob(qrSvg);
+        qrPngBlobRef.current = pngBlob;
+      }
 
-      const svgMarkup = new XMLSerializer().serializeToString(clonedSvg);
-      const svgBlob = new Blob([svgMarkup], { type: "image/svg+xml;charset=utf-8" });
-      const svgUrl = URL.createObjectURL(svgBlob);
-      const image = new Image();
-
-      await new Promise<void>((resolve, reject) => {
-        image.onload = () => resolve();
-        image.onerror = () => reject(new Error("โหลดรูป QR ไม่สำเร็จ"));
-        image.src = svgUrl;
-      });
-
-      const canvas = document.createElement("canvas");
-      canvas.width = 1200;
-      canvas.height = 1200;
-      const context = canvas.getContext("2d");
-      if (!context) throw new Error("อุปกรณ์ไม่รองรับการสร้างรูป");
-
-      context.fillStyle = "#ffffff";
-      context.fillRect(0, 0, canvas.width, canvas.height);
-      context.drawImage(image, 100, 100, 1000, 1000);
-      URL.revokeObjectURL(svgUrl);
-
-      const pngBlob = await new Promise<Blob>((resolve, reject) => {
-        canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error("สร้างไฟล์ PNG ไม่สำเร็จ")), "image/png");
-      });
-      const amountLabel = money.format(Number(amountText)).replace(/[^\d]/g, "") || "payment";
-      const fileName = `ChatPOS-QR-${amountLabel}.png`;
-      const file = new File([pngBlob], fileName, { type: "image/png" });
-      const shareData = { files: [file], title: "ChatPOS QR Payment", text: `QR รับชำระ ฿${money.format(Number(amountText))}` };
-
-      if (navigator.share && navigator.canShare?.(shareData)) {
-        await navigator.share(shareData);
-        toast.success("เปิดเมนูบันทึกรูป QR แล้ว");
+      if (isLineEnvironment()) {
+        if (!shareQrBlob(pngBlob)) {
+          showQrSavePreview(pngBlob);
+          toast.info("แตะรูป QR ค้าง 1–2 วินาที แล้วเลือกบันทึกรูปภาพ");
+        }
         return;
       }
 
-      const pngUrl = URL.createObjectURL(pngBlob);
-      const downloadLink = document.createElement("a");
-      downloadLink.href = pngUrl;
-      downloadLink.download = fileName;
-      downloadLink.rel = "noopener";
-      document.body.appendChild(downloadLink);
-      downloadLink.click();
-      downloadLink.remove();
-      window.setTimeout(() => URL.revokeObjectURL(pngUrl), 1500);
-      toast.success(isLineEnvironment() ? "ดาวน์โหลดรูป QR แล้ว กรุณาตรวจสอบในเครื่อง" : "บันทึกรูป QR ลงเครื่องแล้ว");
-    } catch (error) {
-      if (error instanceof DOMException && error.name === "AbortError") return;
+      downloadQrBlob(pngBlob);
+    } catch {
       toast.error("บันทึกรูป QR ไม่สำเร็จ กรุณาลองอีกครั้ง");
     }
   };
@@ -1065,7 +1136,7 @@ export default function HomePage() {
         <BottomNav view={view} go={go} />
       </div>
 
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+      <Dialog open={dialogOpen} onOpenChange={(open) => { setDialogOpen(open); if (!open) closeQrSavePreview(); }}>
         <DialogContent
           className={`payment-dialog ${dialogStage === "ready" ? "qr-scanner-dialog" : ""}`}
           showCloseButton={dialogStage !== "ready"}
@@ -1117,6 +1188,25 @@ export default function HomePage() {
               <p className="qr-instruction">แสดง QR ให้ลูกค้าสแกนชำระเงิน</p>
               <div className="qr-waiting-status"><span /> กำลังรอรับชำระเงิน</div>
               <button className="qr-check-button" onClick={confirmPayment}><ShieldCheck /> ตรวจสอบการชำระ</button>
+
+              {qrSavePreview && (
+                <div className="qr-save-preview" role="dialog" aria-modal="true" aria-label="บันทึกรูป QR ใน LINE">
+                  <div className="qr-save-preview-card">
+                    <button type="button" className="qr-save-preview-close" onClick={closeQrSavePreview} aria-label="ปิด">×</button>
+                    <div className="qr-save-preview-icon"><ArrowDownToLine /></div>
+                    <h3>บันทึกรูป QR ใน LINE</h3>
+                    <p>แตะรูป QR ค้างไว้ 1–2 วินาที<br />แล้วเลือก “ดาวน์โหลดรูปภาพ” หรือ “บันทึกรูปภาพ”</p>
+                    <img src={qrSavePreview} alt="รูป QR สำหรับบันทึกลงมือถือ" draggable={false} />
+                    <button type="button" className="qr-save-share-button" onClick={() => {
+                      const pngBlob = qrPngBlobRef.current;
+                      if (pngBlob && !shareQrBlob(pngBlob)) toast.info("เครื่องนี้ไม่รองรับเมนูแชร์ กรุณาแตะรูปค้างเพื่อบันทึก");
+                    }}>
+                      <ExternalLink /> แชร์หรือบันทึกผ่านมือถือ
+                    </button>
+                    <button type="button" className="qr-save-back-button" onClick={closeQrSavePreview}>กลับหน้าสแกนจ่าย</button>
+                  </div>
+                </div>
+              )}
             </section>
           ) : dialogStage === "checking" ? (
             <div className="success-dialog checking-dialog">
