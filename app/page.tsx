@@ -314,6 +314,7 @@ export default function HomePage() {
   const audioContextRef = useRef<AudioContext | null>(null);
   const spokenAudioRef = useRef<HTMLAudioElement | null>(null);
   const voiceFailureNotifiedRef = useRef(false);
+  const qrImageRef = useRef<HTMLDivElement | null>(null);
 
   const amount = Number(amountText || 0);
   const cartTotal = useMemo(() => cart.reduce((sum, item) => sum + item.price * item.qty, 0), [cart]);
@@ -650,6 +651,74 @@ export default function HomePage() {
         );
       }
     }, 1200);
+  };
+
+  const saveQrImage = async () => {
+    const qrSvg = qrImageRef.current?.querySelector("svg");
+    if (!qrSvg) {
+      toast.error("ยังไม่พบรูป QR กรุณาลองอีกครั้ง");
+      return;
+    }
+
+    try {
+      const clonedSvg = qrSvg.cloneNode(true) as SVGSVGElement;
+      clonedSvg.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+      clonedSvg.setAttribute("width", "1024");
+      clonedSvg.setAttribute("height", "1024");
+      clonedSvg.setAttribute("viewBox", qrSvg.getAttribute("viewBox") || "0 0 24 24");
+      clonedSvg.setAttribute("color", "#020706");
+      clonedSvg.setAttribute("stroke", "#020706");
+
+      const svgMarkup = new XMLSerializer().serializeToString(clonedSvg);
+      const svgBlob = new Blob([svgMarkup], { type: "image/svg+xml;charset=utf-8" });
+      const svgUrl = URL.createObjectURL(svgBlob);
+      const image = new Image();
+
+      await new Promise<void>((resolve, reject) => {
+        image.onload = () => resolve();
+        image.onerror = () => reject(new Error("โหลดรูป QR ไม่สำเร็จ"));
+        image.src = svgUrl;
+      });
+
+      const canvas = document.createElement("canvas");
+      canvas.width = 1200;
+      canvas.height = 1200;
+      const context = canvas.getContext("2d");
+      if (!context) throw new Error("อุปกรณ์ไม่รองรับการสร้างรูป");
+
+      context.fillStyle = "#ffffff";
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      context.drawImage(image, 100, 100, 1000, 1000);
+      URL.revokeObjectURL(svgUrl);
+
+      const pngBlob = await new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error("สร้างไฟล์ PNG ไม่สำเร็จ")), "image/png");
+      });
+      const amountLabel = money.format(Number(amountText)).replace(/[^\d]/g, "") || "payment";
+      const fileName = `ChatPOS-QR-${amountLabel}.png`;
+      const file = new File([pngBlob], fileName, { type: "image/png" });
+      const shareData = { files: [file], title: "ChatPOS QR Payment", text: `QR รับชำระ ฿${money.format(Number(amountText))}` };
+
+      if (navigator.share && navigator.canShare?.(shareData)) {
+        await navigator.share(shareData);
+        toast.success("เปิดเมนูบันทึกรูป QR แล้ว");
+        return;
+      }
+
+      const pngUrl = URL.createObjectURL(pngBlob);
+      const downloadLink = document.createElement("a");
+      downloadLink.href = pngUrl;
+      downloadLink.download = fileName;
+      downloadLink.rel = "noopener";
+      document.body.appendChild(downloadLink);
+      downloadLink.click();
+      downloadLink.remove();
+      window.setTimeout(() => URL.revokeObjectURL(pngUrl), 1500);
+      toast.success(isLineEnvironment() ? "ดาวน์โหลดรูป QR แล้ว กรุณาตรวจสอบในเครื่อง" : "บันทึกรูป QR ลงเครื่องแล้ว");
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") return;
+      toast.error("บันทึกรูป QR ไม่สำเร็จ กรุณาลองอีกครั้ง");
+    }
   };
 
   const addProduct = (product: (typeof products)[number]) => {
@@ -1006,15 +1075,14 @@ export default function HomePage() {
               <DialogDescription className="sr-only">QR สำหรับรับชำระเงินจำนวน {money.format(Number(amountText))} บาท</DialogDescription>
               <header className="qr-screen-header">
                 <button type="button" onClick={() => setDialogOpen(false)} aria-label="ย้อนกลับ"><ArrowLeft /></button>
-                <DialogTitle>สแกนจ่าย/รับ</DialogTitle>
+                <DialogTitle>สแกนจ่าย</DialogTitle>
                 <span aria-hidden="true" />
               </header>
 
-              <nav className="qr-mode-tabs" aria-label="โหมด QR">
-                <span>สแกน</span>
-                <span>QR จ่ายเงิน</span>
-                <span className="active">QR รับเงิน</span>
-              </nav>
+              <button type="button" className="qr-save-button" onClick={saveQrImage}>
+                <ArrowDownToLine />
+                <span>Save รูป QR ลงมือถือ</span>
+              </button>
 
               <div className="qr-scan-zone">
                 <div className="qr-payment-card">
@@ -1028,7 +1096,7 @@ export default function HomePage() {
                       <strong>VISA</strong>
                       <i aria-label="Mastercard"><span /><span /></i>
                     </div>
-                    <div className="merchant-qr"><QrCode /></div>
+                    <div ref={qrImageRef} className="merchant-qr"><QrCode /></div>
                     <h3>ร้านตัวอย่าง</h3>
                     <p>{paymentContext}</p>
                     <div className="qr-total">฿{money.format(Number(amountText))}</div>
