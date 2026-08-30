@@ -399,11 +399,10 @@ button:focus-visible, input:focus-visible { outline: 3px solid rgba(245, 189, 58
 .qr-screen-header button:active { background: rgba(255,255,255,.1); }
 .qr-screen-header button svg { width: 32px; height: 32px; stroke-width: 1.8; }
 .qr-scanner-dialog .qr-screen-header [data-slot="dialog-title"] { color: white; font-size: 29px; font-weight: 800; letter-spacing: -.02em; }
-.qr-mode-tabs { display: grid; grid-template-columns: repeat(3, 1fr); min-height: 67px; border-bottom: 1px solid rgba(255,255,255,.08); }
-.qr-mode-tabs span { position: relative; display: grid; place-items: center; padding: 10px 4px 14px; color: rgba(255,255,255,.56); font-size: 19px; font-weight: 700; white-space: nowrap; }
-.qr-mode-tabs span.active { color: white; }
-.qr-mode-tabs span.active::after { content: ""; position: absolute; left: 18%; right: 18%; bottom: 0; height: 4px; border-radius: 99px 99px 0 0; background: #20d7c2; box-shadow: 0 0 16px rgba(32,215,194,.55); }
-.qr-scan-zone { position: relative; display: grid; place-items: center; width: min(88%, 392px); margin: 28px auto 17px; padding: 16px 0; }
+.qr-save-button { width: calc(100% - 40px); min-height: 58px; display: flex; align-items: center; justify-content: center; gap: 10px; margin: 8px auto 4px; border: 1px solid rgba(255,255,255,.18); border-radius: 17px; color: white; background: linear-gradient(115deg, #0bb69d, #2e82e5 58%, #6c59e9); box-shadow: 0 12px 28px rgba(24,133,205,.26); font-size: 18px; font-weight: 900; cursor: pointer; }
+.qr-save-button svg { width: 24px; height: 24px; stroke-width: 2.2; }
+.qr-save-button:active { transform: scale(.985); }
+.qr-scan-zone { position: relative; display: grid; place-items: center; width: min(88%, 392px); margin: 14px auto 17px; padding: 16px 0; }
 .qr-payment-card { position: relative; z-index: 2; width: min(84vw, 336px); overflow: hidden; border-radius: 20px; background: white; box-shadow: 0 22px 54px rgba(0,0,0,.3); }
 .thai-qr-brand { height: 90px; display: flex; align-items: center; justify-content: center; gap: 13px; color: white; background: linear-gradient(135deg, #15446f, #1d5688); }
 .thai-qr-brand > svg { width: 54px; height: 54px; stroke-width: 2.2; }
