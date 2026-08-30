@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import {
   ArrowDownToLine,
   ArrowLeft,
@@ -18,19 +18,24 @@ import {
   ExternalLink,
   Grid2X2,
   Home,
+  ImagePlus,
   Landmark,
   Minus,
   PackageCheck,
+  PackagePlus,
+  Pencil,
   Plus,
   PlayCircle,
   QrCode,
   ReceiptText,
   RotateCcw,
+  Save,
   Settings,
   ShieldCheck,
   ShoppingBasket,
   Sparkles,
   Store,
+  Trash2,
   UtensilsCrossed,
   Volume2,
   VolumeX,
@@ -66,6 +71,7 @@ type View =
   | "orders"
   | "tables"
   | "pos"
+  | "product-manager"
   | "settings";
 
 type PaymentMethod = "promptpay" | "visa" | "truemoney" | "wechat" | "alipay" | "mobile" | "shopeepay";
@@ -78,7 +84,17 @@ type Transaction = {
   status: "สำเร็จ" | "กำลังตรวจสอบ";
 };
 
-type CartItem = { id: number; name: string; price: number; qty: number };
+type Product = {
+  id: number;
+  name: string;
+  price: number;
+  category: string;
+  description: string;
+  image: string | null;
+  active: boolean;
+};
+
+type CartItem = Pick<Product, "id" | "name" | "price"> & { qty: number };
 
 const methods: Record<PaymentMethod, { name: string; short: string; icon: typeof QrCode; tone: string; action: string }> = {
   promptpay: { name: "QR PromptPay", short: "พร้อมเพย์", icon: QrCode, tone: "green", action: "สร้าง QR" },
@@ -90,14 +106,17 @@ const methods: Record<PaymentMethod, { name: string; short: string; icon: typeof
   shopeepay: { name: "ShopeePay", short: "ShopeePay", icon: WalletCards, tone: "gold", action: "รับ ShopeePay" },
 };
 
-const products = [
-  { id: 1, name: "กะเพราไก่ไข่ดาว", price: 75 },
-  { id: 2, name: "ข้าวผัดกุ้ง", price: 85 },
-  { id: 3, name: "ต้มยำกุ้ง", price: 150 },
-  { id: 4, name: "ชาไทย", price: 45 },
-  { id: 5, name: "อเมริกาโน่", price: 55 },
-  { id: 6, name: "น้ำเปล่า", price: 20 },
+const seededProducts: Product[] = [
+  { id: 1, name: "กะเพราไก่ไข่ดาว", price: 75, category: "อาหารจานเดียว", description: "", image: null, active: true },
+  { id: 2, name: "ข้าวผัดกุ้ง", price: 85, category: "อาหารจานเดียว", description: "", image: null, active: true },
+  { id: 3, name: "ต้มยำกุ้ง", price: 150, category: "กับข้าว", description: "", image: null, active: true },
+  { id: 4, name: "ชาไทย", price: 45, category: "เครื่องดื่ม", description: "", image: null, active: true },
+  { id: 5, name: "อเมริกาโน่", price: 55, category: "เครื่องดื่ม", description: "", image: null, active: true },
+  { id: 6, name: "น้ำเปล่า", price: 20, category: "เครื่องดื่ม", description: "", image: null, active: true },
 ];
+
+const productCategories = ["อาหารจานเดียว", "กับข้าว", "ของทานเล่น", "เครื่องดื่ม", "ของหวาน", "สินค้าอื่นๆ"];
+const PRODUCT_STORAGE_KEY = "chatpos-product-catalog-v1";
 
 const seededTransactions: Transaction[] = [
   { id: "CP-240816-017", method: "QR PromptPay", amount: 320, time: "10:45 น.", status: "สำเร็จ" },
@@ -106,6 +125,33 @@ const seededTransactions: Transaction[] = [
 ];
 
 const money = new Intl.NumberFormat("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+function compressProductImage(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("อ่านรูปสินค้าไม่สำเร็จ"));
+    reader.onload = () => {
+      if (typeof reader.result !== "string") return reject(new Error("อ่านรูปสินค้าไม่สำเร็จ"));
+      const image = new Image();
+      image.onerror = () => reject(new Error("เปิดรูปสินค้าไม่สำเร็จ"));
+      image.onload = () => {
+        const maxSide = 720;
+        const scale = Math.min(1, maxSide / Math.max(image.naturalWidth, image.naturalHeight));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+        canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+        const context = canvas.getContext("2d");
+        if (!context) return reject(new Error("เตรียมรูปสินค้าไม่สำเร็จ"));
+        context.fillStyle = "#ffffff";
+        context.fillRect(0, 0, canvas.width, canvas.height);
+        context.drawImage(image, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL("image/jpeg", 0.8));
+      };
+      image.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
 
 const thaiDigits = ["ศูนย์", "หนึ่ง", "สอง", "สาม", "สี่", "ห้า", "หก", "เจ็ด", "แปด", "เก้า"];
 const thaiPlaces = ["", "สิบ", "ร้อย", "พัน", "หมื่น", "แสน"];
@@ -307,7 +353,9 @@ function BottomNav({ view, go }: { view: View; go: (view: View) => void }) {
     <nav className="bottom-nav" aria-label="เมนูหลัก">
       {nav.map((item) => {
         const Icon = item.icon;
-        const active = view === item.key || (item.key === "home" && ["payment", "method-picker", "other-methods", "withdraw", "transactions"].includes(view));
+        const active = view === item.key
+          || (item.key === "pos" && view === "product-manager")
+          || (item.key === "home" && ["payment", "method-picker", "other-methods", "withdraw", "transactions"].includes(view));
         return (
           <button key={item.key} onClick={() => go(item.key)} className={`${active ? "active" : ""} ${item.center ? "nav-home" : ""}`}>
             <span><Icon /></span>
@@ -340,6 +388,15 @@ export default function HomePage() {
   const [transactions, setTransactions] = useState<Transaction[]>(seededTransactions);
   const [availableBalance, setAvailableBalance] = useState(8500);
   const [cart, setCart] = useState<CartItem[]>([]);
+  const [catalog, setCatalog] = useState<Product[]>(seededProducts);
+  const [catalogReady, setCatalogReady] = useState(false);
+  const [editingProductId, setEditingProductId] = useState<number | null>(null);
+  const [productName, setProductName] = useState("");
+  const [productPrice, setProductPrice] = useState("");
+  const [productCategory, setProductCategory] = useState(productCategories[0]);
+  const [productDescription, setProductDescription] = useState("");
+  const [productImage, setProductImage] = useState<string | null>(null);
+  const [productActive, setProductActive] = useState(true);
   const [paymentContext, setPaymentContext] = useState("รับชำระทั่วไป");
   const [withdrawText, setWithdrawText] = useState("");
   const [bankAccount, setBankAccount] = useState("main");
@@ -357,10 +414,56 @@ export default function HomePage() {
   const qrImageRef = useRef<HTMLDivElement | null>(null);
   const qrPngBlobRef = useRef<Blob | null>(null);
   const qrPreviewUrlRef = useRef<string | null>(null);
+  const productFormRef = useRef<HTMLFormElement | null>(null);
+  const productStorageErrorRef = useRef(false);
 
   const amount = Number(amountText || 0);
   const cartTotal = useMemo(() => cart.reduce((sum, item) => sum + item.price * item.qty, 0), [cart]);
   const todayTotal = useMemo(() => transactions.filter((item) => item.amount > 0).reduce((sum, item) => sum + item.amount, 0), [transactions]);
+  const activeProducts = useMemo(() => catalog.filter((product) => product.active), [catalog]);
+
+  useEffect(() => {
+    try {
+      const storedCatalog = window.localStorage.getItem(PRODUCT_STORAGE_KEY);
+      if (storedCatalog) {
+        const parsed = JSON.parse(storedCatalog) as unknown;
+        if (Array.isArray(parsed)) {
+          const restored = parsed.flatMap((item): Product[] => {
+            if (!item || typeof item !== "object") return [];
+            const candidate = item as Partial<Product>;
+            if (typeof candidate.id !== "number" || !Number.isFinite(candidate.id) || typeof candidate.name !== "string" || typeof candidate.price !== "number" || !Number.isFinite(candidate.price) || candidate.price <= 0) return [];
+            return [{
+              id: candidate.id,
+              name: candidate.name,
+              price: candidate.price,
+              category: typeof candidate.category === "string" ? candidate.category : "สินค้าอื่นๆ",
+              description: typeof candidate.description === "string" ? candidate.description : "",
+              image: typeof candidate.image === "string" ? candidate.image : null,
+              active: candidate.active !== false,
+            }];
+          });
+          setCatalog(restored);
+        }
+      }
+    } catch {
+      // Keep the built-in starter catalog when browser storage is unavailable or invalid.
+    } finally {
+      setCatalogReady(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!catalogReady) return;
+    try {
+      window.localStorage.setItem(PRODUCT_STORAGE_KEY, JSON.stringify(catalog));
+      productStorageErrorRef.current = false;
+    } catch {
+      if (!productStorageErrorRef.current) {
+        toast.error("พื้นที่บันทึกในเครื่องเต็ม กรุณาใช้รูปสินค้าที่มีขนาดเล็กลง");
+        productStorageErrorRef.current = true;
+      }
+    }
+  }, [catalog, catalogReady]);
 
   useEffect(() => {
     const inLine = isLineEnvironment();
@@ -779,14 +882,105 @@ export default function HomePage() {
     }
   };
 
-  const addProduct = (product: (typeof products)[number]) => {
+  const addProduct = (product: Product) => {
     setCart((current) => {
       const found = current.find((item) => item.id === product.id);
       return found
         ? current.map((item) => item.id === product.id ? { ...item, qty: item.qty + 1 } : item)
-        : [...current, { ...product, qty: 1 }];
+        : [...current, { id: product.id, name: product.name, price: product.price, qty: 1 }];
     });
     toast.success(`เพิ่ม ${product.name} แล้ว`);
+  };
+
+  const resetProductForm = () => {
+    setEditingProductId(null);
+    setProductName("");
+    setProductPrice("");
+    setProductCategory(productCategories[0]);
+    setProductDescription("");
+    setProductImage(null);
+    setProductActive(true);
+  };
+
+  const handleProductImage = async (event: ChangeEvent<HTMLInputElement>) => {
+    const input = event.currentTarget;
+    const file = input.files?.[0];
+    if (!file) return;
+    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+      toast.error("รองรับรูป JPG, PNG หรือ WebP เท่านั้น");
+      input.value = "";
+      return;
+    }
+    if (file.size > 8 * 1024 * 1024) {
+      toast.error("รูปสินค้าต้องมีขนาดไม่เกิน 8 MB");
+      input.value = "";
+      return;
+    }
+    try {
+      setProductImage(await compressProductImage(file));
+      toast.success("เพิ่มรูปสินค้าแล้ว");
+    } catch {
+      toast.error("อ่านรูปสินค้าไม่สำเร็จ กรุณาเลือกรูปใหม่");
+    } finally {
+      input.value = "";
+    }
+  };
+
+  const submitProduct = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const name = productName.trim();
+    const parsedPrice = Number(productPrice.replace(",", "."));
+    if (!name) return toast.error("กรุณากรอกชื่อสินค้า");
+    if (!Number.isFinite(parsedPrice) || parsedPrice <= 0) return toast.error("กรุณากรอกราคาสินค้ามากกว่า 0 บาท");
+    const price = Math.round(parsedPrice * 100) / 100;
+
+    if (editingProductId !== null) {
+      setCatalog((current) => current.map((product) => product.id === editingProductId ? {
+        ...product,
+        name,
+        price,
+        category: productCategory,
+        description: productDescription.trim(),
+        image: productImage,
+        active: productActive,
+      } : product));
+      toast.success(`อัปเดต ${name} เรียบร้อยแล้ว`);
+    } else {
+      setCatalog((current) => [{
+        id: Date.now(),
+        name,
+        price,
+        category: productCategory,
+        description: productDescription.trim(),
+        image: productImage,
+        active: productActive,
+      }, ...current]);
+      toast.success(`บันทึก ${name} เรียบร้อยแล้ว`);
+    }
+    resetProductForm();
+  };
+
+  const editProduct = (product: Product) => {
+    setEditingProductId(product.id);
+    setProductName(product.name);
+    setProductPrice(String(product.price));
+    setProductCategory(product.category);
+    setProductDescription(product.description);
+    setProductImage(product.image);
+    setProductActive(product.active);
+    window.setTimeout(() => productFormRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
+  };
+
+  const toggleProductActive = (id: number, active: boolean) => {
+    setCatalog((current) => current.map((product) => product.id === id ? { ...product, active } : product));
+  };
+
+  const deleteProduct = (product: Product) => {
+    if (!window.confirm(`ยืนยันลบ “${product.name}” ออกจากรายการสินค้า?`)) return;
+    setCatalog((current) => current.filter((item) => item.id !== product.id));
+    setCart((current) => current.filter((item) => item.id !== product.id));
+    if (editingProductId === product.id) resetProductForm();
+    toast.success(`ลบ ${product.name} แล้ว`);
   };
 
   const changeQty = (id: number, delta: number) => {
@@ -1068,9 +1262,28 @@ export default function HomePage() {
       <Header title="POS" />
       <main className="screen content-screen pos-screen">
         <ScreenTitle title="ขายหน้าร้าน" subtitle="แตะสินค้าเพื่อเพิ่มลงตะกร้า" />
-        <div className="product-grid">
-          {products.map((product) => <button key={product.id} onClick={() => addProduct(product)}><span><Plus /></span><strong>{product.name}</strong><small>฿{money.format(product.price)}</small></button>)}
-        </div>
+        <button className="product-manager-entry" onClick={() => go("product-manager")}>
+          <span><PackagePlus /></span>
+          <div><strong>บันทึกรายการอาหาร / สินค้า</strong><small>เพิ่มรูป หมวดหมู่ ชื่อ และราคา</small></div>
+          <ChevronRight />
+        </button>
+        {activeProducts.length > 0 ? (
+          <div className="product-grid">
+            {activeProducts.map((product) => (
+              <button className="product-card" key={product.id} onClick={() => addProduct(product)} aria-label={`เพิ่ม ${product.name} ลงตะกร้า`}>
+                <div className="product-card-media">
+                  {product.image ? <img src={product.image} alt="" /> : <span className="product-card-placeholder"><PackagePlus /></span>}
+                </div>
+                <span className="product-add-icon"><Plus /></span>
+                <em>{product.category}</em>
+                <strong>{product.name}</strong>
+                <small>฿{money.format(product.price)}</small>
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div className="product-empty-state"><PackagePlus /><strong>ยังไม่มีสินค้าที่เปิดขาย</strong><p>แตะปุ่มด้านบนเพื่อเพิ่มรายการแรก</p></div>
+        )}
         <section className="cart-panel">
           <div className="cart-title"><h3><ShoppingBasket /> ตะกร้าสินค้า</h3><span>{cart.reduce((sum, item) => sum + item.qty, 0)} รายการ</span></div>
           {cart.length === 0 ? <div className="cart-empty">ยังไม่มีสินค้าในตะกร้า</div> : cart.map((item) => (
@@ -1082,6 +1295,99 @@ export default function HomePage() {
           <div className="cart-total"><span>ยอดรวม</span><strong>฿{money.format(cartTotal)}</strong></div>
           <button className="primary-button" disabled={!cart.length} onClick={() => openMethodPicker(cartTotal, "POS หน้าร้าน")}><CreditCard /> รับชำระเงิน</button>
         </section>
+      </main>
+    </>
+  );
+
+  const ProductManagerScreen = () => (
+    <>
+      <Header title="เพิ่มสินค้า" onBack={() => go("pos")} />
+      <main className="screen content-screen product-manager-screen">
+        <ScreenTitle title="บันทึกรายการอาหาร / สินค้า" subtitle="ข้อมูลที่บันทึกจะแสดงในหน้า POS ของเครื่องนี้ทันที" />
+
+        <section className="product-manager-intro">
+          <span><Sparkles /></span>
+          <div><strong>AI Product Setup</strong><p>เพิ่มข้อมูลให้ครบ เพื่อให้พนักงานเลือกขายได้ง่ายและรวดเร็ว</p></div>
+        </section>
+
+        <form className="product-form" ref={productFormRef} onSubmit={submitProduct}>
+          <div className="product-form-heading">
+            <span><PackagePlus /></span>
+            <div><h3>{editingProductId === null ? "เพิ่มรายการใหม่" : "แก้ไขรายการสินค้า"}</h3><p>ช่องที่มีเครื่องหมาย * จำเป็นต้องกรอก</p></div>
+          </div>
+
+          <div className="product-photo-section">
+            <label className={`product-photo-upload ${productImage ? "has-image" : ""}`}>
+              <span className="product-photo-frame">
+                {productImage ? <img src={productImage} alt="ตัวอย่างรูปสินค้า" /> : <ImagePlus />}
+              </span>
+              <span className="product-photo-copy"><strong>{productImage ? "เปลี่ยนรูปสินค้า" : "ใส่รูปสินค้า"}</strong><small>รองรับ JPG, PNG, WebP ไม่เกิน 8 MB</small></span>
+              <input type="file" accept="image/jpeg,image/png,image/webp" onChange={handleProductImage} hidden />
+            </label>
+            {productImage && <button type="button" className="remove-product-image" onClick={() => setProductImage(null)}>ลบรูป</button>}
+          </div>
+
+          <div className="product-fields-grid">
+            <label className="product-field product-field-full">
+              <span>ชื่ออาหาร / สินค้า *</span>
+              <input value={productName} onChange={(event) => setProductName(event.target.value)} placeholder="เช่น กะเพราไก่ไข่ดาว" maxLength={80} autoComplete="off" />
+            </label>
+
+            <div className="product-field">
+              <span>หมวดหมู่ *</span>
+              <Select value={productCategory} onValueChange={setProductCategory}>
+                <SelectTrigger className="product-category-select" aria-label="เลือกหมวดหมู่สินค้า"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {productCategories.map((category) => <SelectItem key={category} value={category}>{category}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <label className="product-field">
+              <span>ราคาขาย (บาท) *</span>
+              <div className="product-price-input"><b>฿</b><input value={productPrice} onChange={(event) => setProductPrice(event.target.value)} placeholder="0.00" inputMode="decimal" min="0" step="0.01" type="number" /></div>
+            </label>
+
+            <label className="product-field product-field-full">
+              <span>รายละเอียดเพิ่มเติม</span>
+              <textarea value={productDescription} onChange={(event) => setProductDescription(event.target.value)} placeholder="เช่น ไม่ใส่ผงชูรส หรือรายละเอียดเมนู" maxLength={180} rows={3} />
+            </label>
+          </div>
+
+          <div className="product-availability">
+            <span><strong>เปิดขายในหน้า POS</strong><small>{productActive ? "ลูกค้าสามารถสั่งรายการนี้ได้ทันที" : "บันทึกไว้ก่อน แต่ยังไม่แสดงในหน้า POS"}</small></span>
+            <Switch checked={productActive} onCheckedChange={setProductActive} aria-label="เปิดขายสินค้าในหน้า POS" />
+          </div>
+
+          <div className="product-form-actions">
+            {editingProductId !== null && <button type="button" className="product-cancel-button" onClick={resetProductForm}>ยกเลิกแก้ไข</button>}
+            <button type="submit" className="product-save-button"><Save /> {editingProductId === null ? "บันทึกสินค้า" : "บันทึกการแก้ไข"}</button>
+          </div>
+        </form>
+
+        <section className="saved-products-section">
+          <div className="saved-products-heading"><div><h3>รายการที่บันทึกแล้ว</h3><p>จัดการสินค้าและสถานะเปิดขาย</p></div><span>{catalog.length} รายการ</span></div>
+          {catalog.length === 0 ? (
+            <div className="saved-products-empty"><PackagePlus /><strong>ยังไม่มีรายการสินค้า</strong><p>กรอกข้อมูลด้านบนแล้วกดบันทึกสินค้า</p></div>
+          ) : (
+            <div className="saved-products-list">
+              {catalog.map((product) => (
+                <article className="saved-product-card" key={product.id}>
+                  <div className="saved-product-main">
+                    <span className="saved-product-image">{product.image ? <img src={product.image} alt="" /> : <PackagePlus />}</span>
+                    <div className="saved-product-info"><em>{product.category}</em><strong>{product.name}</strong><small>฿{money.format(product.price)}{product.description ? ` · ${product.description}` : ""}</small></div>
+                  </div>
+                  <div className="saved-product-controls">
+                    <label><span><strong>{product.active ? "เปิดขาย" : "ปิดขาย"}</strong><small>แสดงในหน้า POS</small></span><Switch checked={product.active} onCheckedChange={(checked) => toggleProductActive(product.id, checked)} aria-label={`${product.active ? "ปิด" : "เปิด"}ขาย ${product.name}`} /></label>
+                    <div><button type="button" onClick={() => editProduct(product)}><Pencil /> แก้ไข</button><button type="button" className="delete-product-button" onClick={() => deleteProduct(product)}><Trash2 /> ลบ</button></div>
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
+        </section>
+
+        <button className="go-to-pos-button" onClick={() => go("pos")}><ShoppingBasket /> ไปหน้าขายสินค้า <ChevronRight /></button>
       </main>
     </>
   );
@@ -1113,6 +1419,7 @@ export default function HomePage() {
     if (view === "orders") return <OrdersScreen />;
     if (view === "tables") return <TablesScreen />;
     if (view === "pos") return <PosScreen />;
+    if (view === "product-manager") return <ProductManagerScreen />;
     return <SettingsScreen />;
   };
 
