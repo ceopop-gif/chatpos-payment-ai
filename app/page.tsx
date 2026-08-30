@@ -997,19 +997,59 @@ export default function HomePage() {
       </div>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="payment-dialog">
+        <DialogContent
+          className={`payment-dialog ${dialogStage === "ready" ? "qr-scanner-dialog" : ""}`}
+          showCloseButton={dialogStage !== "ready"}
+        >
           {dialogStage === "ready" ? (
-            <>
-              <DialogHeader>
-                <div className="dialog-method"><MethodMark method={method} size="lg" /></div>
-                <DialogTitle>{method === "promptpay" || method === "mobile" ? "สแกนเพื่อชำระเงิน" : `พร้อมรับ ${methods[method].short}`}</DialogTitle>
-                <DialogDescription>{paymentContext}</DialogDescription>
-              </DialogHeader>
-              <div className="dialog-amount">฿{money.format(Number(amountText))}</div>
-              {(method === "promptpay" || method === "mobile") && <div className="qr-preview"><QrCode /></div>}
-              <div className="dialog-status"><span></span>กำลังรอรับชำระเงิน</div>
-              <button className="primary-button" onClick={confirmPayment}><ShieldCheck /> ตรวจสอบการชำระ</button>
-            </>
+            <section className="receive-qr-screen">
+              <DialogDescription className="sr-only">QR สำหรับรับชำระเงินจำนวน {money.format(Number(amountText))} บาท</DialogDescription>
+              <header className="qr-screen-header">
+                <button type="button" onClick={() => setDialogOpen(false)} aria-label="ย้อนกลับ"><ArrowLeft /></button>
+                <DialogTitle>สแกนจ่าย/รับ</DialogTitle>
+                <span aria-hidden="true" />
+              </header>
+
+              <nav className="qr-mode-tabs" aria-label="โหมด QR">
+                <span>สแกน</span>
+                <span>QR จ่ายเงิน</span>
+                <span className="active">QR รับเงิน</span>
+              </nav>
+
+              <div className="qr-scan-zone">
+                <div className="qr-payment-card">
+                  <div className="thai-qr-brand">
+                    <QrCode />
+                    <span>THAI QR <b>PAYMENT</b></span>
+                  </div>
+                  <div className="qr-payment-body">
+                    <div className="payment-brand-row" aria-label="ช่องทางที่รองรับ">
+                      <b>PromptPay</b>
+                      <strong>VISA</strong>
+                      <i aria-label="Mastercard"><span /><span /></i>
+                    </div>
+                    <div className="merchant-qr"><QrCode /></div>
+                    <h3>ร้านตัวอย่าง</h3>
+                    <p>{paymentContext}</p>
+                    <div className="qr-total">฿{money.format(Number(amountText))}</div>
+                    <small>เลขอ้างอิง: CP0001234</small>
+                  </div>
+                </div>
+                <div className="scan-beam" aria-hidden="true" />
+                <i className="scan-corner corner-tl" aria-hidden="true" />
+                <i className="scan-corner corner-tr" aria-hidden="true" />
+                <i className="scan-corner corner-bl" aria-hidden="true" />
+                <i className="scan-corner corner-br" aria-hidden="true" />
+              </div>
+
+              <div className="qr-trust-row">
+                <span><Volume2 /> เสียงไทย</span>
+                <span><ShieldCheck /> ตรวจสอบปลอดภัย</span>
+              </div>
+              <p className="qr-instruction">แสดง QR ให้ลูกค้าสแกนชำระเงิน</p>
+              <div className="qr-waiting-status"><span /> กำลังรอรับชำระเงิน</div>
+              <button className="qr-check-button" onClick={confirmPayment}><ShieldCheck /> ตรวจสอบการชำระ</button>
+            </section>
           ) : dialogStage === "checking" ? (
             <div className="success-dialog checking-dialog">
               <div className="checking-ring"><ShieldCheck /></div>
