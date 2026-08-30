@@ -377,8 +377,71 @@ button:focus-visible, input:focus-visible { outline: 3px solid rgba(245, 189, 58
 .success-dialog > strong { margin: 20px 0; color: var(--green-950); font-size: 38px; font-weight: 900; }
 .success-dialog .text-button { margin-top: 10px; border: 0; padding: 8px; color: var(--green-700); background: transparent; font-weight: 800; cursor: pointer; }
 
+.payment-dialog.qr-scanner-dialog {
+  width: min(100%, 480px);
+  max-width: 480px;
+  height: 100dvh;
+  max-height: 100dvh;
+  gap: 0;
+  overflow-y: auto;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  color: white;
+  background:
+    radial-gradient(circle at 50% 42%, rgba(23, 192, 175, .14), transparent 18rem),
+    linear-gradient(180deg, #18383c 0%, #09272b 46%, #071f23 100%);
+  box-shadow: 0 30px 100px rgba(0, 0, 0, .48);
+}
+.receive-qr-screen { min-height: 100%; display: flex; flex-direction: column; }
+.qr-screen-header { min-height: 82px; display: grid; grid-template-columns: 52px 1fr 52px; align-items: center; padding: max(14px, env(safe-area-inset-top)) 16px 8px; }
+.qr-screen-header button { display: grid; place-items: center; width: 48px; height: 48px; border: 0; border-radius: 999px; color: white; background: transparent; cursor: pointer; }
+.qr-screen-header button:active { background: rgba(255,255,255,.1); }
+.qr-screen-header button svg { width: 32px; height: 32px; stroke-width: 1.8; }
+.qr-scanner-dialog .qr-screen-header [data-slot="dialog-title"] { color: white; font-size: 29px; font-weight: 800; letter-spacing: -.02em; }
+.qr-mode-tabs { display: grid; grid-template-columns: repeat(3, 1fr); min-height: 67px; border-bottom: 1px solid rgba(255,255,255,.08); }
+.qr-mode-tabs span { position: relative; display: grid; place-items: center; padding: 10px 4px 14px; color: rgba(255,255,255,.56); font-size: 19px; font-weight: 700; white-space: nowrap; }
+.qr-mode-tabs span.active { color: white; }
+.qr-mode-tabs span.active::after { content: ""; position: absolute; left: 18%; right: 18%; bottom: 0; height: 4px; border-radius: 99px 99px 0 0; background: #20d7c2; box-shadow: 0 0 16px rgba(32,215,194,.55); }
+.qr-scan-zone { position: relative; display: grid; place-items: center; width: min(88%, 392px); margin: 28px auto 17px; padding: 16px 0; }
+.qr-payment-card { position: relative; z-index: 2; width: min(84vw, 336px); overflow: hidden; border-radius: 20px; background: white; box-shadow: 0 22px 54px rgba(0,0,0,.3); }
+.thai-qr-brand { height: 90px; display: flex; align-items: center; justify-content: center; gap: 13px; color: white; background: linear-gradient(135deg, #15446f, #1d5688); }
+.thai-qr-brand > svg { width: 54px; height: 54px; stroke-width: 2.2; }
+.thai-qr-brand > span { display: flex; flex-direction: column; font-size: 24px; font-weight: 900; line-height: .92; letter-spacing: -.02em; }
+.thai-qr-brand > span b { font-size: 22px; }
+.qr-payment-body { display: flex; flex-direction: column; align-items: center; padding: 15px 18px 18px; color: #101716; }
+.payment-brand-row { width: 100%; display: flex; align-items: center; justify-content: center; gap: 20px; min-height: 34px; }
+.payment-brand-row > b { border: 2px solid #1b6b89; padding: 2px 5px; color: #075f82; background: white; font-size: 14px; line-height: 1; }
+.payment-brand-row > strong { color: #1258a2; font-size: 22px; font-style: italic; letter-spacing: -.06em; }
+.payment-brand-row > i { position: relative; width: 50px; height: 28px; display: block; }
+.payment-brand-row > i span { position: absolute; top: 3px; width: 24px; height: 24px; border-radius: 50%; background: #eb252d; }
+.payment-brand-row > i span:first-child { left: 4px; }
+.payment-brand-row > i span:last-child { right: 4px; background: #f6a51b; opacity: .9; }
+.merchant-qr { display: grid; place-items: center; width: 205px; height: 205px; margin: 7px 0 8px; color: #020706; background: repeating-linear-gradient(45deg, #fff 0 7px, #edf5f3 7px 14px); }
+.merchant-qr svg { width: 194px; height: 194px; stroke-width: 1.75; }
+.qr-payment-body h3 { margin: 5px 0 0; color: #10231f; font-size: 23px; font-weight: 900; }
+.qr-payment-body p { margin: 1px 0 0; color: #71807c; font-size: 14px; }
+.qr-total { margin: 8px 0 4px; color: #075944; font-size: 31px; font-weight: 900; }
+.qr-payment-body small { color: #9ca8a5; font-size: 12px; }
+.scan-beam { position: absolute; z-index: 4; top: 5%; bottom: 5%; left: 50%; width: 2px; transform: translateX(-50%); background: linear-gradient(180deg, transparent, #27e7d1 12%, #27e7d1 88%, transparent); box-shadow: 0 0 15px #23d8c4, 0 0 34px rgba(35,216,196,.55); animation: scanner-sweep 2.1s ease-in-out infinite alternate; }
+.scan-corner { position: absolute; z-index: 5; width: 48px; height: 48px; border-color: #20d7c2; border-style: solid; filter: drop-shadow(0 0 7px rgba(32,215,194,.55)); }
+.corner-tl { top: 6px; left: 0; border-width: 3px 0 0 3px; border-radius: 13px 0 0 0; }
+.corner-tr { top: 6px; right: 0; border-width: 3px 3px 0 0; border-radius: 0 13px 0 0; }
+.corner-bl { bottom: 6px; left: 0; border-width: 0 0 3px 3px; border-radius: 0 0 0 13px; }
+.corner-br { right: 0; bottom: 6px; border-width: 0 3px 3px 0; border-radius: 0 0 13px 0; }
+.qr-trust-row { display: flex; align-items: center; justify-content: center; gap: 12px; padding: 0 16px; }
+.qr-trust-row span { display: flex; align-items: center; gap: 7px; min-height: 38px; border: 1px solid rgba(255,255,255,.14); border-radius: 999px; padding: 7px 12px; color: #ddfaf4; background: rgba(255,255,255,.06); font-size: 13px; font-weight: 800; }
+.qr-trust-row svg { width: 18px; height: 18px; color: #45e6d3; }
+.qr-instruction { margin: 16px 18px 0; color: white; font-size: 18px; font-weight: 800; text-align: center; }
+.qr-waiting-status { display: flex; align-items: center; justify-content: center; gap: 10px; margin: 10px 0 15px; color: #c2d9d5; font-size: 15px; font-weight: 700; }
+.qr-waiting-status span { width: 11px; height: 11px; border-radius: 50%; background: #22d8bd; box-shadow: 0 0 0 6px rgba(34,216,189,.12); animation: pulse 1.4s infinite; }
+.qr-check-button { width: calc(100% - 40px); min-height: 58px; display: flex; align-items: center; justify-content: center; gap: 10px; margin: 0 auto max(18px, env(safe-area-inset-bottom)); border: 0; border-radius: 17px; color: white; background: linear-gradient(115deg, #0bb69d, #2e82e5 55%, #6c59e9); box-shadow: 0 13px 30px rgba(32,133,218,.28); font-size: 18px; font-weight: 900; cursor: pointer; }
+.qr-check-button svg { width: 23px; height: 23px; }
+.qr-check-button:active { transform: scale(.985); }
+
 @keyframes pulse { 50% { transform: scale(.75); opacity: .65; } }
 @keyframes payment-check-spin { to { transform: rotate(360deg); } }
+@keyframes scanner-sweep { from { transform: translateX(-50%) translateX(-105px); } to { transform: translateX(-50%) translateX(105px); } }
 
 @media (max-width: 380px) {
   .screen { padding-left: 13px; padding-right: 13px; }
@@ -394,6 +457,7 @@ button:focus-visible, input:focus-visible { outline: 3px solid rgba(245, 189, 58
 @media (min-width: 700px) {
   .phone-app { min-height: calc(100vh - 40px); margin-top: 20px; border-radius: 34px 34px 0 0; }
   .bottom-nav { border-radius: 20px 20px 0 0; }
+  .payment-dialog.qr-scanner-dialog { height: min(900px, calc(100dvh - 40px)); max-height: calc(100dvh - 40px); border-radius: 30px; }
 }
 
 /* ChatPOS AI — modern intelligence layer */
@@ -723,4 +787,5 @@ body { background: #071b18; }
   .live-dot, .ai-orb::after, .balance-strip::before { animation: none; }
   .keypad .pay-action.is-speaking { animation: none; }
   .voice-check.voice-speaking > span svg { animation: none; }
+  .scan-beam { animation: none; }
 }
