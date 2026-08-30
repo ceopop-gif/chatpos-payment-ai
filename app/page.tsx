@@ -111,6 +111,8 @@ const thaiDigits = ["ศูนย์", "หนึ่ง", "สอง", "สา�
 const thaiPlaces = ["", "สิบ", "ร้อย", "พัน", "หมื่น", "แสน"];
 const thaiDigitClips = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine"];
 const thaiPlaceClips = ["", "ten", "hundred", "thousand", "ten_thousand", "hundred_thousand"];
+const DEVICE_VOICE_RATE = 1.05;
+const LINE_VOICE_RATE = 1.18;
 
 const lineKeyClips: Record<string, string> = {
   "0": "zero", "1": "one", "2": "two", "3": "three", "4": "four",
@@ -324,6 +326,8 @@ export default function HomePage() {
       const audio = new Audio(lineVoiceClipUrl("test"));
       audio.preload = "auto";
       audio.volume = 1;
+      audio.defaultPlaybackRate = LINE_VOICE_RATE;
+      audio.playbackRate = LINE_VOICE_RATE;
       audio.setAttribute("playsinline", "true");
       audio.load();
       spokenAudioRef.current = audio;
@@ -398,7 +402,7 @@ export default function HomePage() {
       const utterance = new window.SpeechSynthesisUtterance(text);
       utteranceRef.current = utterance;
       utterance.lang = "th-TH";
-      utterance.rate = 0.82;
+      utterance.rate = DEVICE_VOICE_RATE;
       utterance.pitch = 1;
       utterance.volume = 1;
       const voices = synth.getVoices();
@@ -443,6 +447,8 @@ export default function HomePage() {
     spokenAudioRef.current = audio;
     audio.preload = "auto";
     audio.volume = 1;
+    audio.defaultPlaybackRate = LINE_VOICE_RATE;
+    audio.playbackRate = LINE_VOICE_RATE;
     audio.setAttribute("playsinline", "true");
     audio.onended = null;
     audio.onerror = null;
@@ -470,6 +476,7 @@ export default function HomePage() {
       clipIndex += 1;
       audio.src = lineVoiceClipUrl(clip);
       audio.currentTime = 0;
+      audio.playbackRate = LINE_VOICE_RATE;
       audio.load();
       const playResult = audio.play();
       if (playResult) void playResult.catch(() => finish(false));
