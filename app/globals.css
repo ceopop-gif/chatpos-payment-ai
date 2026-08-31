@@ -1091,6 +1091,7 @@ body { background: #071b18; }
 }
 .table-link-actions .table-qr-action { grid-column: 1 / -1; border-color: transparent; color: #17372f; background: linear-gradient(135deg, #ffe486, #f8be43 58%, #f0a62c); box-shadow: 0 8px 19px rgba(240,166,44,.22); font-size: 15px; }
 .table-link-actions .table-qr-action svg { width: 21px; height: 21px; }
+.table-link-actions .table-edit-action { grid-column: 1 / -1; border-color: #d9d3ff; color: #5c4dc3; background: #f1efff; }
 .table-link-actions a { border-color: transparent; color: white; background: linear-gradient(135deg, #00a977, #3f79e9 65%, #725fde); }
 .table-link-actions svg { width: 18px; height: 18px; }
 .table-view-orders { width: 100%; min-height: 48px; display: flex; align-items: center; justify-content: center; gap: 7px; margin-top: 9px; border: 1px solid rgba(255,255,255,.28); border-radius: 13px; color: #fff; background: linear-gradient(135deg, #b80f24, #ed2038 56%, #c30d23); box-shadow: 0 9px 22px rgba(207,20,43,.28); cursor: pointer; font-size: 13px; font-weight: 900; }

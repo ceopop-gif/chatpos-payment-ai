@@ -59,3 +59,29 @@ export async function POST(request: Request) {
     return Response.json({ error: error instanceof Error ? error.message : "เพิ่มโต๊ะไม่สำเร็จ" }, { status: 500 });
   }
 }
+
+export async function PATCH(request: Request) {
+  try {
+    const payload = (await request.json()) as { id?: number; name?: string };
+    const id = Number(payload.id);
+    const name = String(payload.name ?? "").trim().replace(/\s+/g, " ").slice(0, 60);
+
+    if (!Number.isInteger(id) || id < 1) return Response.json({ error: "ไม่พบโต๊ะที่ต้องการแก้ไข" }, { status: 400 });
+    if (!name) return Response.json({ error: "กรุณากรอกชื่อหรือหมายเลขโต๊ะ" }, { status: 400 });
+
+    const db = getD1();
+    const current = await db.prepare("SELECT id FROM restaurant_tables WHERE id = ? AND active = 1 LIMIT 1").bind(id).first();
+    if (!current) return Response.json({ error: "ไม่พบโต๊ะนี้ในระบบ" }, { status: 404 });
+
+    const duplicate = await db.prepare("SELECT id FROM restaurant_tables WHERE active = 1 AND name = ? AND id <> ? LIMIT 1").bind(name, id).first();
+    if (duplicate) return Response.json({ error: "มีชื่อโต๊ะนี้แล้ว" }, { status: 409 });
+
+    const table = await db.prepare(
+      "UPDATE restaurant_tables SET name = ? WHERE id = ? RETURNING id, name, token, active, created_at"
+    ).bind(name, id).first();
+
+    return Response.json({ table });
+  } catch (error) {
+    return Response.json({ error: error instanceof Error ? error.message : "แก้ไขชื่อโต๊ะไม่สำเร็จ" }, { status: 500 });
+  }
+}

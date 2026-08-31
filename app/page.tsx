@@ -540,6 +540,9 @@ export default function HomePage() {
   const [newTableName, setNewTableName] = useState("");
   const [tableSearch, setTableSearch] = useState("");
   const [addingTable, setAddingTable] = useState(false);
+  const [editingTable, setEditingTable] = useState<RestaurantTable | null>(null);
+  const [editingTableName, setEditingTableName] = useState("");
+  const [savingTableName, setSavingTableName] = useState(false);
   const [tableQrOpen, setTableQrOpen] = useState(false);
   const [selectedQrTable, setSelectedQrTable] = useState<RestaurantTable | null>(null);
   const [tableQrPreview, setTableQrPreview] = useState<string | null>(null);
@@ -1128,6 +1131,45 @@ export default function HomePage() {
       toast.error(error instanceof Error ? error.message : "เพิ่มโต๊ะไม่สำเร็จ");
     } finally {
       setAddingTable(false);
+    }
+  };
+
+  const openTableEditor = (table: RestaurantTable) => {
+    setEditingTable(table);
+    setEditingTableName(table.name);
+  };
+
+  const closeTableEditor = () => {
+    if (savingTableName) return;
+    setEditingTable(null);
+    setEditingTableName("");
+  };
+
+  const updateTableName = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!editingTable) return;
+    const name = editingTableName.trim().replace(/\s+/g, " ");
+    if (!name) return toast.error("กรุณากรอกชื่อหรือหมายเลขโต๊ะ");
+
+    setSavingTableName(true);
+    try {
+      const response = await fetch("/api/tables", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ id: editingTable.id, name }),
+      });
+      const payload = await response.json() as { table?: { id: number; name: string }; error?: string };
+      if (!response.ok || !payload.table) throw new Error(payload.error || "แก้ไขชื่อโต๊ะไม่สำเร็จ");
+
+      setTables((current) => current.map((table) => table.id === editingTable.id ? { ...table, name: payload.table!.name } : table));
+      setSelectedQrTable((current) => current?.id === editingTable.id ? { ...current, name: payload.table!.name } : current);
+      toast.success(`เปลี่ยนชื่อเป็น ${payload.table.name} แล้ว`);
+      setEditingTable(null);
+      setEditingTableName("");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "แก้ไขชื่อโต๊ะไม่สำเร็จ");
+    } finally {
+      setSavingTableName(false);
     }
   };
 
@@ -1762,6 +1804,7 @@ export default function HomePage() {
                 <code>{tableOrderLink(table)}</code>
                 <div className="table-link-actions">
                   <button type="button" className="table-qr-action" onClick={() => openTableQr(table)}><ArrowDownToLine /> ดาวน์โหลด QR ประจำโต๊ะ</button>
+                  <button type="button" className="table-edit-action" onClick={() => openTableEditor(table)}><Pencil /> แก้ไขชื่อโต๊ะ</button>
                   <button type="button" onClick={() => copyTableLink(table)}><Copy /> คัดลอกลิงก์</button>
                   <a href={`/order/${table.token}`} target="_blank" rel="noreferrer"><ExternalLink /> เปิดหน้าสั่ง</a>
                 </div>
@@ -2173,6 +2216,26 @@ export default function HomePage() {
               <p className="table-qr-link-label"><ShieldCheck /> QR นี้ใช้ได้เฉพาะ {selectedQrTable.name}</p>
             </section>
           ))}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(editingTable)} onOpenChange={(open) => { if (!open) closeTableEditor(); }}>
+        <DialogContent className="category-dialog table-edit-dialog" showCloseButton={!savingTableName}>
+          <DialogHeader>
+            <div className="category-dialog-icon"><Pencil /></div>
+            <DialogTitle>แก้ไขชื่อโต๊ะ</DialogTitle>
+            <DialogDescription>เปลี่ยนชื่อหรือหมายเลขโต๊ะได้ โดยลิงก์และ QR เดิมยังใช้งานต่อได้</DialogDescription>
+          </DialogHeader>
+          <form onSubmit={updateTableName}>
+            <label>
+              <span>ชื่อหรือหมายเลขโต๊ะ</span>
+              <input value={editingTableName} onChange={(event) => setEditingTableName(event.target.value)} placeholder="เช่น โต๊ะ 12 หรือห้อง VIP" maxLength={60} autoFocus autoComplete="off" />
+            </label>
+            <div className="category-dialog-actions">
+              <button type="button" onClick={closeTableEditor} disabled={savingTableName}>ยกเลิก</button>
+              <button type="submit" disabled={savingTableName}><Save /> {savingTableName ? "กำลังบันทึก..." : "บันทึกชื่อใหม่"}</button>
+            </div>
+          </form>
         </DialogContent>
       </Dialog>
 
