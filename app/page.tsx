@@ -1765,7 +1765,7 @@ export default function HomePage() {
                   <button type="button" onClick={() => copyTableLink(table)}><Copy /> คัดลอกลิงก์</button>
                   <a href={`/order/${table.token}`} target="_blank" rel="noreferrer"><ExternalLink /> เปิดหน้าสั่ง</a>
                 </div>
-                {table.orderCount > 0 && <button type="button" className="table-view-orders" onClick={() => go("orders")}><ClipboardList /> ดูออเดอร์ของโต๊ะนี้ <ChevronRight /></button>}
+                {table.orderCount > 0 && <button type="button" className="table-view-orders" onClick={() => go("orders")}><ClipboardList /><span>ดูออเดอร์ของโต๊ะนี้</span><ChevronRight /></button>}
               </article>
             ))}
           </div>
