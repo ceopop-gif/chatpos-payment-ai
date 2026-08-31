@@ -35,7 +35,6 @@ import {
   Settings,
   ShieldCheck,
   ShoppingBasket,
-  Share2,
   Sparkles,
   Store,
   Trash2,
@@ -64,6 +63,7 @@ import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
+import { QRCodeSVG } from "qrcode.react";
 
 type View =
   | "home"
@@ -334,6 +334,110 @@ async function qrSvgToPngBlob(qrSvg: SVGSVGElement): Promise<Blob> {
   }
 }
 
+function canvasRoundRect(context: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, radius: number) {
+  const safeRadius = Math.min(radius, width / 2, height / 2);
+  context.beginPath();
+  context.moveTo(x + safeRadius, y);
+  context.lineTo(x + width - safeRadius, y);
+  context.quadraticCurveTo(x + width, y, x + width, y + safeRadius);
+  context.lineTo(x + width, y + height - safeRadius);
+  context.quadraticCurveTo(x + width, y + height, x + width - safeRadius, y + height);
+  context.lineTo(x + safeRadius, y + height);
+  context.quadraticCurveTo(x, y + height, x, y + height - safeRadius);
+  context.lineTo(x, y + safeRadius);
+  context.quadraticCurveTo(x, y, x + safeRadius, y);
+  context.closePath();
+}
+
+function drawFittedCanvasText(context: CanvasRenderingContext2D, text: string, centerX: number, y: number, maxWidth: number, startSize: number, weight = 900) {
+  let fontSize = startSize;
+  do {
+    context.font = `${weight} ${fontSize}px Tahoma, "Noto Sans Thai", Arial, sans-serif`;
+    if (context.measureText(text).width <= maxWidth) break;
+    fontSize -= 2;
+  } while (fontSize > 28);
+  context.textAlign = "center";
+  context.fillText(text, centerX, y);
+}
+
+async function tableQrToPngBlob(qrSvg: SVGSVGElement, tableName: string, link: string): Promise<Blob> {
+  const clonedSvg = qrSvg.cloneNode(true) as SVGSVGElement;
+  clonedSvg.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+  clonedSvg.setAttribute("width", "1024");
+  clonedSvg.setAttribute("height", "1024");
+  clonedSvg.setAttribute("viewBox", qrSvg.getAttribute("viewBox") || "0 0 256 256");
+
+  const svgBlob = new Blob([new XMLSerializer().serializeToString(clonedSvg)], { type: "image/svg+xml;charset=utf-8" });
+  const svgUrl = URL.createObjectURL(svgBlob);
+  const qrImage = new Image();
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      qrImage.onload = () => resolve();
+      qrImage.onerror = () => reject(new Error("โหลด QR ประจำโต๊ะไม่สำเร็จ"));
+      qrImage.src = svgUrl;
+    });
+
+    const canvas = document.createElement("canvas");
+    canvas.width = 1200;
+    canvas.height = 1500;
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("อุปกรณ์ไม่รองรับการสร้างรูป");
+
+    context.fillStyle = "#eef7f3";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+
+    const headerGradient = context.createLinearGradient(0, 0, canvas.width, 280);
+    headerGradient.addColorStop(0, "#063d33");
+    headerGradient.addColorStop(.58, "#08715b");
+    headerGradient.addColorStop(1, "#446fdd");
+    context.fillStyle = headerGradient;
+    context.fillRect(0, 0, canvas.width, 290);
+
+    context.fillStyle = "#ffffff";
+    context.textAlign = "left";
+    context.font = "900 72px Tahoma, Arial, sans-serif";
+    context.fillText("ChatPOS", 82, 112);
+    context.fillStyle = "#9ff4d7";
+    context.font = "800 34px Tahoma, \"Noto Sans Thai\", Arial, sans-serif";
+    context.fillText("สแกนเพื่อสั่งอาหาร", 84, 171);
+
+    context.fillStyle = "#ffffff";
+    canvasRoundRect(context, 70, 215, 1060, 1165, 54);
+    context.fill();
+
+    context.fillStyle = "#6356c8";
+    context.font = "900 28px Tahoma, \"Noto Sans Thai\", Arial, sans-serif";
+    context.textAlign = "center";
+    context.fillText("ลิงก์สั่งอาหารประจำโต๊ะ", 600, 312);
+
+    context.fillStyle = "#123b31";
+    drawFittedCanvasText(context, tableName, 600, 396, 940, 76);
+
+    context.fillStyle = "#ffffff";
+    context.shadowColor = "rgba(7, 45, 37, .14)";
+    context.shadowBlur = 26;
+    canvasRoundRect(context, 156, 455, 888, 888, 38);
+    context.fill();
+    context.shadowColor = "transparent";
+    context.shadowBlur = 0;
+    context.drawImage(qrImage, 196, 495, 808, 808);
+
+    context.fillStyle = "#087b59";
+    context.font = "900 34px Tahoma, \"Noto Sans Thai\", Arial, sans-serif";
+    context.textAlign = "center";
+    context.fillText("เปิดกล้องแล้วสแกน QR Code", 600, 1425);
+    context.fillStyle = "#6d7f78";
+    drawFittedCanvasText(context, new URL(link).host, 600, 1470, 990, 24, 700);
+
+    return await new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error("สร้างรูป QR ไม่สำเร็จ")), "image/png", 1);
+    });
+  } finally {
+    URL.revokeObjectURL(svgUrl);
+  }
+}
+
 function MethodMark({ method, size = "md" }: { method: PaymentMethod; size?: "sm" | "md" | "lg" }) {
   const Icon = methods[method].icon;
   return (
@@ -436,6 +540,10 @@ export default function HomePage() {
   const [newTableName, setNewTableName] = useState("");
   const [tableSearch, setTableSearch] = useState("");
   const [addingTable, setAddingTable] = useState(false);
+  const [tableQrOpen, setTableQrOpen] = useState(false);
+  const [selectedQrTable, setSelectedQrTable] = useState<RestaurantTable | null>(null);
+  const [tableQrPreview, setTableQrPreview] = useState<string | null>(null);
+  const [tableQrGenerating, setTableQrGenerating] = useState(false);
   const [tableOrders, setTableOrders] = useState<TableOrder[]>([]);
   const [ordersLoading, setOrdersLoading] = useState(false);
   const [paymentContext, setPaymentContext] = useState("รับชำระทั่วไป");
@@ -455,6 +563,9 @@ export default function HomePage() {
   const qrImageRef = useRef<HTMLDivElement | null>(null);
   const qrPngBlobRef = useRef<Blob | null>(null);
   const qrPreviewUrlRef = useRef<string | null>(null);
+  const tableQrImageRef = useRef<HTMLDivElement | null>(null);
+  const tableQrPngBlobRef = useRef<Blob | null>(null);
+  const tableQrPreviewUrlRef = useRef<string | null>(null);
   const productFormRef = useRef<HTMLFormElement | null>(null);
   const productStorageErrorRef = useRef(false);
   const categoryStorageErrorRef = useRef(false);
@@ -684,6 +795,7 @@ export default function HomePage() {
 
   useEffect(() => () => {
     if (qrPreviewUrlRef.current) URL.revokeObjectURL(qrPreviewUrlRef.current);
+    if (tableQrPreviewUrlRef.current) URL.revokeObjectURL(tableQrPreviewUrlRef.current);
   }, []);
 
   const cancelSpeech = () => {
@@ -897,17 +1009,101 @@ export default function HomePage() {
     copied ? toast.success(`คัดลอกลิงก์ ${table.name} แล้ว`) : toast.error("คัดลอกลิงก์ไม่สำเร็จ กรุณาเปิดใน Chrome");
   };
 
-  const shareTableLink = async (table: RestaurantTable) => {
-    const url = tableOrderLink(table);
-    if (navigator.share) {
-      try {
-        await navigator.share({ title: `สั่งอาหาร ${table.name}`, text: `เปิดเมนูสั่งอาหารสำหรับ ${table.name}`, url });
-        return;
-      } catch (error) {
-        if (error instanceof DOMException && error.name === "AbortError") return;
-      }
+  const tableQrFileName = (table: RestaurantTable) => {
+    const safeName = table.name.trim().replace(/[^\p{L}\p{N}-]+/gu, "-").replace(/^-+|-+$/g, "") || `table-${table.id}`;
+    return `ChatPOS-QR-${safeName}.png`;
+  };
+
+  const clearTableQrPreview = () => {
+    setTableQrPreview(null);
+    tableQrPngBlobRef.current = null;
+    if (tableQrPreviewUrlRef.current) {
+      URL.revokeObjectURL(tableQrPreviewUrlRef.current);
+      tableQrPreviewUrlRef.current = null;
     }
-    await copyTableLink(table);
+  };
+
+  const openTableQr = (table: RestaurantTable) => {
+    clearTableQrPreview();
+    setSelectedQrTable(table);
+    setTableQrOpen(true);
+  };
+
+  const closeTableQr = () => {
+    setTableQrOpen(false);
+    setSelectedQrTable(null);
+    clearTableQrPreview();
+  };
+
+  const buildTableQrImage = async () => {
+    if (!selectedQrTable) throw new Error("ไม่พบข้อมูลโต๊ะ");
+    if (tableQrPngBlobRef.current) return tableQrPngBlobRef.current;
+    const qrSvg = tableQrImageRef.current?.querySelector("svg");
+    if (!qrSvg) throw new Error("ยังไม่พบ QR Code");
+    const blob = await tableQrToPngBlob(qrSvg, selectedQrTable.name, tableOrderLink(selectedQrTable));
+    tableQrPngBlobRef.current = blob;
+    return blob;
+  };
+
+  const showTableQrPreview = (blob: Blob) => {
+    if (tableQrPreviewUrlRef.current) URL.revokeObjectURL(tableQrPreviewUrlRef.current);
+    const previewUrl = URL.createObjectURL(blob);
+    tableQrPreviewUrlRef.current = previewUrl;
+    setTableQrPreview(previewUrl);
+  };
+
+  const saveTableQrImage = async () => {
+    if (!selectedQrTable) return;
+    setTableQrGenerating(true);
+    try {
+      const blob = await buildTableQrImage();
+      showTableQrPreview(blob);
+
+      if (isLineEnvironment()) {
+        toast.success("สร้างรูปแล้ว กดเปิดรูปเต็มจอและแตะรูปค้างเพื่อบันทึก");
+        return;
+      }
+
+      const anchor = document.createElement("a");
+      anchor.href = tableQrPreviewUrlRef.current ?? URL.createObjectURL(blob);
+      anchor.download = tableQrFileName(selectedQrTable);
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      toast.success(`บันทึกรูป QR ${selectedQrTable.name} แล้ว`);
+    } catch {
+      toast.error("สร้างรูป QR ประจำโต๊ะไม่สำเร็จ กรุณาลองอีกครั้ง");
+    } finally {
+      setTableQrGenerating(false);
+    }
+  };
+
+  const shareTableQrImage = async () => {
+    if (!selectedQrTable) return;
+    setTableQrGenerating(true);
+    try {
+      const blob = await buildTableQrImage();
+      showTableQrPreview(blob);
+      const file = new File([blob], tableQrFileName(selectedQrTable), { type: "image/png" });
+      const shareData = { files: [file], title: `QR สั่งอาหาร ${selectedQrTable.name}`, text: `QR สั่งอาหารประจำ ${selectedQrTable.name}` };
+      if (!navigator.share || (navigator.canShare && !navigator.canShare(shareData))) {
+        toast.info("เครื่องนี้ไม่รองรับเมนูบันทึก กรุณาดาวน์โหลดหรือเปิดรูปเต็มจอ");
+        return;
+      }
+      await navigator.share(shareData);
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") return;
+      toast.info("หากเปิดใน LINE ให้เปิดรูปเต็มจอแล้วแตะรูปค้างเพื่อบันทึก");
+    } finally {
+      setTableQrGenerating(false);
+    }
+  };
+
+  const openTableQrFullScreen = () => {
+    const previewUrl = tableQrPreviewUrlRef.current;
+    if (!previewUrl) return;
+    const opened = window.open(previewUrl, "_blank");
+    if (!opened) window.location.assign(previewUrl);
   };
 
   const createTable = async (event: FormEvent<HTMLFormElement>) => {
@@ -1539,7 +1735,7 @@ export default function HomePage() {
     <>
       <Header title="จัดการโต๊ะ" />
       <main className="screen content-screen table-manager-screen">
-        <ScreenTitle title="โต๊ะและลิงก์สั่งอาหาร" subtitle="เพิ่มโต๊ะได้ไม่จำกัด แต่ละโต๊ะมีลิงก์สั่งอาหารเฉพาะของตัวเอง" />
+        <ScreenTitle title="โต๊ะ ลิงก์ และ QR สั่งอาหาร" subtitle="เพิ่มโต๊ะได้ไม่จำกัด แล้วดาวน์โหลดรูป QR เฉพาะของแต่ละโต๊ะได้ทันที" />
 
         <form className="add-table-panel" onSubmit={createTable}>
           <span><UtensilsCrossed /></span>
@@ -1547,7 +1743,7 @@ export default function HomePage() {
           <button type="submit" disabled={addingTable}><Plus /> {addingTable ? "กำลังสร้าง..." : "เพิ่มโต๊ะ"}</button>
         </form>
 
-        <section className="table-link-note"><Sparkles /><span><strong>ลิงก์รู้หมายเลขโต๊ะอัตโนมัติ</strong><small>ลูกค้าเห็นเฉพาะเมนูสั่งอาหาร ไม่เห็นระบบหลังร้าน การเงิน หรือการตั้งค่า</small></span></section>
+        <section className="table-link-note"><Sparkles /><span><strong>QR รู้หมายเลขโต๊ะอัตโนมัติ</strong><small>ดาวน์โหลดรูปไปพิมพ์ติดโต๊ะได้ ลูกค้าเห็นเฉพาะเมนูสั่งอาหาร</small></span></section>
 
         <div className="table-list-toolbar">
           <span><strong>โต๊ะทั้งหมด</strong><small>{tables.length} โต๊ะ</small></span>
@@ -1565,8 +1761,8 @@ export default function HomePage() {
                 </div>
                 <code>{tableOrderLink(table)}</code>
                 <div className="table-link-actions">
+                  <button type="button" className="table-qr-action" onClick={() => openTableQr(table)}><ArrowDownToLine /> ดาวน์โหลด QR ประจำโต๊ะ</button>
                   <button type="button" onClick={() => copyTableLink(table)}><Copy /> คัดลอกลิงก์</button>
-                  <button type="button" onClick={() => shareTableLink(table)}><Share2 /> แชร์</button>
                   <a href={`/order/${table.token}`} target="_blank" rel="noreferrer"><ExternalLink /> เปิดหน้าสั่ง</a>
                 </div>
                 {table.orderCount > 0 && <button type="button" className="table-view-orders" onClick={() => go("orders")}><ClipboardList /> ดูออเดอร์ของโต๊ะนี้ <ChevronRight /></button>}
@@ -1916,6 +2112,67 @@ export default function HomePage() {
               <button className="primary-button" onClick={() => { setDialogOpen(false); go("transactions"); }}><ReceiptText /> ตรวจสอบสถานะ</button>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={tableQrOpen} onOpenChange={(open) => { if (!open) closeTableQr(); }}>
+        <DialogContent className="table-qr-dialog" showCloseButton={!tableQrPreview}>
+          {selectedQrTable && (tableQrPreview ? (
+            <section className="table-qr-save-screen">
+              <button type="button" className="table-qr-back" onClick={clearTableQrPreview}><ArrowLeft /> กลับไปดู QR</button>
+              <div className="table-qr-ready-icon"><CheckCircle2 /></div>
+              <DialogTitle>รูป QR พร้อมบันทึก</DialogTitle>
+              <DialogDescription>รูปนี้เป็นลิงก์สั่งอาหารเฉพาะของ {selectedQrTable.name}</DialogDescription>
+
+              <a className="table-qr-save-image" href={tableQrPreview} download={tableQrFileName(selectedQrTable)} aria-label={`ดาวน์โหลดรูป QR ${selectedQrTable.name}`}>
+                <img src={tableQrPreview} alt={`QR Code สั่งอาหารประจำ ${selectedQrTable.name}`} />
+              </a>
+
+              <div className="table-qr-save-actions">
+                <a href={tableQrPreview} download={tableQrFileName(selectedQrTable)}><ArrowDownToLine /> ดาวน์โหลดรูป PNG</a>
+                <button type="button" onClick={openTableQrFullScreen}><ExternalLink /> เปิดรูปเต็มจอ</button>
+                <button type="button" onClick={shareTableQrImage}><ArrowDownToLine /> บันทึกผ่านมือถือ</button>
+              </div>
+              <p className="table-qr-line-help"><b>เปิดผ่าน LINE:</b> กด “เปิดรูปเต็มจอ” แล้วแตะรูปค้าง เลือก “บันทึกรูปภาพ”</p>
+              <button type="button" className="table-qr-finish" onClick={closeTableQr}>เสร็จแล้ว</button>
+            </section>
+          ) : (
+            <section className="table-qr-create-screen">
+              <DialogHeader>
+                <span className="table-qr-dialog-icon"><QrCode /></span>
+                <DialogTitle>QR สั่งอาหารประจำโต๊ะ</DialogTitle>
+                <DialogDescription>ลูกค้าสแกนแล้วเปิดเมนูของโต๊ะนี้โดยอัตโนมัติ</DialogDescription>
+              </DialogHeader>
+
+              <div className="table-qr-poster-preview">
+                <header><b>ChatPOS</b><small>สแกนเพื่อสั่งอาหาร</small></header>
+                <div className="table-qr-poster-body">
+                  <small>ลิงก์สั่งอาหารประจำโต๊ะ</small>
+                  <h3>{selectedQrTable.name}</h3>
+                  <div ref={tableQrImageRef} className="table-qr-code" aria-label={`QR Code สำหรับ ${selectedQrTable.name}`}>
+                    <QRCodeSVG
+                      value={tableOrderLink(selectedQrTable)}
+                      size={280}
+                      level="H"
+                      marginSize={4}
+                      bgColor="#ffffff"
+                      fgColor="#062e27"
+                      title={`สั่งอาหาร ${selectedQrTable.name}`}
+                    />
+                  </div>
+                  <p>เปิดกล้องแล้วสแกน QR Code</p>
+                </div>
+              </div>
+
+              <div className="table-qr-create-actions">
+                <button type="button" className="table-qr-save-primary" disabled={tableQrGenerating} onClick={saveTableQrImage}>
+                  <ArrowDownToLine /> {tableQrGenerating ? "กำลังสร้างรูป..." : "บันทึกรูป QR"}
+                </button>
+                <button type="button" disabled={tableQrGenerating} onClick={shareTableQrImage}><ArrowDownToLine /> บันทึกผ่านมือถือ</button>
+              </div>
+              <p className="table-qr-link-label"><ShieldCheck /> QR นี้ใช้ได้เฉพาะ {selectedQrTable.name}</p>
+            </section>
+          ))}
         </DialogContent>
       </Dialog>
 
