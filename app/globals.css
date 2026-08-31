@@ -347,6 +347,30 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 3px
 .product-manager-entry small { margin-top: 4px; color: rgba(235,255,249,.76); font-size: 13px; font-weight: 700; }
 .product-manager-entry > svg { width: 23px; }
 
+.pos-search-panel { margin-bottom: 14px; }
+.pos-search-box {
+  min-height: 58px;
+  display: grid;
+  grid-template-columns: 25px minmax(0, 1fr) 44px;
+  align-items: center;
+  gap: 8px;
+  border: 2px solid #c8ddd5;
+  border-radius: 18px;
+  padding: 0 6px 0 15px;
+  background: rgba(255,255,255,.94);
+  box-shadow: 0 8px 20px rgba(7,27,24,.08), inset 0 1px 0 white;
+  transition: border-color .2s ease, box-shadow .2s ease;
+}
+.pos-search-box:focus-within { border-color: #3f7bea; box-shadow: 0 0 0 4px rgba(63,123,234,.11), 0 10px 24px rgba(7,27,24,.1); }
+.pos-search-box > svg { width: 24px; height: 24px; color: #178967; }
+.pos-search-box input { min-width: 0; min-height: 54px; border: 0; outline: 0; color: #143d32; background: transparent; font-size: 16px; font-weight: 700; }
+.pos-search-box input::placeholder { color: #8a9994; font-weight: 600; }
+.pos-search-box input::-webkit-search-cancel-button { display: none; }
+.pos-search-box button { width: 44px; height: 44px; display: grid; place-items: center; border: 0; border-radius: 13px; color: #6556ce; background: #efedff; cursor: pointer; }
+.pos-search-box button svg { width: 20px; height: 20px; }
+.pos-search-status { min-height: 21px; margin: 7px 4px 0; color: #6d7e78; font-size: 12px; line-height: 1.5; }
+.pos-search-status strong { color: #168762; font-weight: 900; }
+
 .pos-category-filter { margin: 0 0 14px; }
 .pos-category-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 0 2px 9px; }
 .pos-category-heading > span { display: flex; align-items: center; gap: 7px; color: #173a31; font-size: 16px; font-weight: 900; }
