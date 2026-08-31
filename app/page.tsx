@@ -30,6 +30,7 @@ import {
   ReceiptText,
   RotateCcw,
   Save,
+  Search,
   Settings,
   ShieldCheck,
   ShoppingBasket,
@@ -40,6 +41,7 @@ import {
   Volume2,
   VolumeX,
   WalletCards,
+  X,
   Zap,
 } from "lucide-react";
 import {
@@ -394,6 +396,7 @@ export default function HomePage() {
   const [categories, setCategories] = useState<string[]>(defaultProductCategories);
   const [categoriesReady, setCategoriesReady] = useState(false);
   const [posCategory, setPosCategory] = useState("ทั้งหมด");
+  const [productSearch, setProductSearch] = useState("");
   const [categoryDialogOpen, setCategoryDialogOpen] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState("");
   const [editingProductId, setEditingProductId] = useState<number | null>(null);
@@ -436,9 +439,15 @@ export default function HomePage() {
       return result;
     }, []);
   }, [categories, catalog]);
+  const searchTerms = useMemo(() => productSearch.trim().toLocaleLowerCase("th-TH").split(/\s+/).filter(Boolean), [productSearch]);
+  const searchMatchedProducts = useMemo(() => activeProducts.filter((product) => {
+    if (searchTerms.length === 0) return true;
+    const searchableText = `${product.name} ${product.category} ${product.description}`.toLocaleLowerCase("th-TH");
+    return searchTerms.every((term) => searchableText.includes(term));
+  }), [activeProducts, searchTerms]);
   const visibleProducts = useMemo(
-    () => posCategory === "ทั้งหมด" ? activeProducts : activeProducts.filter((product) => product.category === posCategory),
-    [activeProducts, posCategory],
+    () => posCategory === "ทั้งหมด" ? searchMatchedProducts : searchMatchedProducts.filter((product) => product.category === posCategory),
+    [searchMatchedProducts, posCategory],
   );
 
   useEffect(() => {
@@ -1344,11 +1353,34 @@ export default function HomePage() {
           <ChevronRight />
         </button>
 
+        <section className="pos-search-panel" aria-label="ค้นหาสินค้า">
+          <div className="pos-search-box">
+            <Search aria-hidden="true" />
+            <input
+              type="search"
+              value={productSearch}
+              onChange={(event) => setProductSearch(event.target.value)}
+              placeholder="ค้นหาอาหารหรือสินค้า เช่น ข้าวมัน"
+              aria-label="ค้นหาอาหารหรือสินค้า"
+              autoComplete="off"
+              inputMode="search"
+            />
+            {productSearch && (
+              <button type="button" onClick={() => setProductSearch("")} aria-label="ล้างคำค้นหา"><X /></button>
+            )}
+          </div>
+          <p className="pos-search-status" aria-live="polite">
+            {productSearch.trim()
+              ? <>พบ <strong>{searchMatchedProducts.length}</strong> รายการจากคำว่า “{productSearch.trim()}”</>
+              : "ค้นหาได้จากชื่อสินค้า หมวดหมู่ หรือรายละเอียด"}
+          </p>
+        </section>
+
         <section className="pos-category-filter" aria-label="เลือกหมวดหมู่สินค้า">
           <div className="pos-category-heading"><span><Grid2X2 /> เลือกหมวดหมู่</span><small>{visibleProducts.length} สินค้า</small></div>
           <div className="pos-category-scroll">
             {["ทั้งหมด", ...availableCategories].map((category) => {
-              const count = category === "ทั้งหมด" ? activeProducts.length : activeProducts.filter((product) => product.category === category).length;
+              const count = category === "ทั้งหมด" ? searchMatchedProducts.length : searchMatchedProducts.filter((product) => product.category === category).length;
               return <button type="button" key={category} className={posCategory === category ? "active" : ""} onClick={() => setPosCategory(category)}><span>{category}</span><small>{count}</small></button>;
             })}
           </div>
@@ -1369,7 +1401,26 @@ export default function HomePage() {
             ))}
           </div>
         ) : (
-          <div className="product-empty-state"><PackagePlus /><strong>{posCategory === "ทั้งหมด" ? "ยังไม่มีสินค้าที่เปิดขาย" : `ยังไม่มีสินค้าในหมวด ${posCategory}`}</strong><p>เพิ่มสินค้าใหม่แล้วเลือกหมวดนี้ได้ทันที</p><button type="button" onClick={() => go("product-manager")}><Plus /> เพิ่มสินค้า</button></div>
+          <div className="product-empty-state">
+            {productSearch.trim() ? <Search /> : <PackagePlus />}
+            <strong>
+              {productSearch.trim()
+                ? searchMatchedProducts.length > 0
+                  ? `ไม่พบคำค้นหาในหมวด ${posCategory}`
+                  : `ไม่พบเมนู “${productSearch.trim()}”`
+                : posCategory === "ทั้งหมด"
+                  ? "ยังไม่มีสินค้าที่เปิดขาย"
+                  : `ยังไม่มีสินค้าในหมวด ${posCategory}`}
+            </strong>
+            <p>{productSearch.trim() ? "ลองเปลี่ยนคำค้นหา หรือดูสินค้าจากทุกหมวด" : "เพิ่มสินค้าใหม่แล้วเลือกหมวดนี้ได้ทันที"}</p>
+            {productSearch.trim() ? (
+              searchMatchedProducts.length > 0
+                ? <button type="button" onClick={() => setPosCategory("ทั้งหมด")}><Grid2X2 /> ดูทุกหมวด</button>
+                : <button type="button" onClick={() => setProductSearch("")}><X /> ล้างการค้นหา</button>
+            ) : (
+              <button type="button" onClick={() => go("product-manager")}><Plus /> เพิ่มสินค้า</button>
+            )}
+          </div>
         )}
         <section className="cart-panel">
           <div className="cart-title"><h3><ShoppingBasket /> ตะกร้าสินค้า</h3><span>{cart.reduce((sum, item) => sum + item.qty, 0)} รายการ</span></div>
