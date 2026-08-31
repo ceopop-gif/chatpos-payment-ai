@@ -133,8 +133,18 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 3px
 .icon-button.gold { color: var(--gold-300); background: transparent; }
 .brand-lock { display: grid; place-items: center; color: var(--gold-300); }
 .brand-lock svg { width: 29px; height: 29px; }
-.notification { position: relative; }
-.notification span { position: absolute; top: -3px; right: -1px; display: grid; place-items: center; width: 20px; height: 20px; border-radius: 999px; background: #e23b3b; color: white; font-size: 11px; font-weight: 900; border: 2px solid var(--green-900); }
+.notification { position: relative; isolation: isolate; }
+.notification::before { content: ""; position: absolute; inset: -5px; z-index: -1; border: 2px solid transparent; border-radius: 18px; pointer-events: none; }
+.notification.has-orders { color: white; border-color: rgba(255,255,255,.42); background: linear-gradient(145deg, #e83f4f, #a42250); box-shadow: 0 0 0 4px rgba(232,63,79,.14), 0 8px 22px rgba(145,18,55,.3); }
+.notification.has-orders::before { border-color: rgba(255,92,110,.66); animation: notification-halo 1.25s ease-out infinite; }
+.notification.ringing svg { transform-origin: 50% 9%; animation: notification-ring .58s ease-in-out 7; }
+.notification.is-ready::after { content: ""; position: absolute; left: -2px; bottom: -2px; width: 9px; height: 9px; border: 2px solid #0a2a24; border-radius: 999px; background: #65f4bd; box-shadow: 0 0 8px #65f4bd; }
+.notification span { position: absolute; top: -6px; right: -6px; display: grid; place-items: center; min-width: 23px; height: 23px; border-radius: 999px; padding: 0 5px; background: #e23b3b; color: white; font-size: 11px; font-weight: 900; line-height: 1; border: 2px solid var(--green-900); }
+.notification-unlock { width: 100%; min-height: 43px; display: flex; align-items: center; justify-content: center; gap: 9px; margin: 13px 0 -10px; border: 1px solid rgba(101,244,189,.34); border-radius: 13px; padding: 7px 12px; color: white; background: rgba(6,38,33,.66); box-shadow: inset 0 1px 0 rgba(255,255,255,.1); cursor: pointer; text-align: left; }
+.notification-unlock > svg { flex: 0 0 auto; width: 21px; height: 21px; color: #65f4bd; }
+.notification-unlock > span { display: grid; gap: 1px; }
+.notification-unlock b { font-size: 12px; }
+.notification-unlock small { color: rgba(228,255,246,.7); font-size: 9px; font-weight: 700; }
 
 .screen { min-height: calc(100vh - 124px); padding: 20px 18px 112px; }
 .home-screen { padding-top: 22px; }
@@ -1426,6 +1436,8 @@ body { background: #071b18; }
 @keyframes ai-pulse { 50% { opacity: .55; transform: scale(.8); } }
 @keyframes ai-orbit { to { transform: rotate(360deg); } }
 @keyframes ai-shimmer { 0%, 72%, 100% { transform: translateX(-110%); } 88% { transform: translateX(110%); } }
+@keyframes notification-ring { 0%, 100% { transform: rotate(0); } 20% { transform: rotate(18deg); } 40% { transform: rotate(-16deg); } 60% { transform: rotate(12deg); } 80% { transform: rotate(-8deg); } }
+@keyframes notification-halo { 0% { opacity: .8; transform: scale(.9); } 100% { opacity: 0; transform: scale(1.28); } }
 @keyframes voice-glow { from { box-shadow: 0 10px 20px rgba(54,118,236,.25); } to { box-shadow: 0 12px 30px rgba(0,185,132,.5), 0 0 0 5px rgba(0,185,132,.09); } }
 @keyframes voice-icon { to { transform: scale(1.18); } }
 
@@ -1465,6 +1477,7 @@ body { background: #071b18; }
 
 @media (prefers-reduced-motion: reduce) {
   .live-dot, .ai-orb::after, .balance-strip::before { animation: none; }
+  .notification.has-orders::before, .notification.ringing svg { animation: none; }
   .keypad .pay-action.is-speaking { animation: none; }
   .voice-check.voice-speaking > span svg { animation: none; }
   .scan-beam { animation: none; }
