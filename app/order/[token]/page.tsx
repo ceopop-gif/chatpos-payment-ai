@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { CheckCircle2, Minus, PackagePlus, Plus, Search, Send, ShoppingBasket, Sparkles, Store, UtensilsCrossed, X } from "lucide-react";
+import { ArrowLeft, CheckCircle2, ClipboardCheck, Minus, PackagePlus, Plus, Search, Send, ShoppingBasket, Sparkles, Store, UtensilsCrossed, Volume2, X } from "lucide-react";
 import { useParams } from "next/navigation";
 import { toast } from "sonner";
 import { Toaster } from "@/components/ui/sonner";
@@ -25,7 +25,18 @@ type OrderContext = {
   categories: string[];
 };
 
+type OrderStage = "menu" | "review" | "success";
+
+type CompletedOrder = {
+  orderNumber: string;
+  tableName: string;
+  total: number;
+  items: CartItem[];
+  note: string;
+};
+
 const money = new Intl.NumberFormat("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const orderSentMessage = "ส่งเมนูเรียบร้อย รออาหารสักครู่ค่ะ";
 
 export default function TableOrderPage() {
   const params = useParams<{ token: string }>();
@@ -38,9 +49,11 @@ export default function TableOrderPage() {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [note, setNote] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const [completedOrder, setCompletedOrder] = useState<{ orderNumber: string; tableName: string; total: number } | null>(null);
+  const [stage, setStage] = useState<OrderStage>("menu");
+  const [completedOrder, setCompletedOrder] = useState<CompletedOrder | null>(null);
   const cartRef = useRef<HTMLElement | null>(null);
   const requestIdRef = useRef("");
+  const completionAudioRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -54,6 +67,32 @@ export default function TableOrderPage() {
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [token]);
+
+  useEffect(() => {
+    const audio = new Audio("/audio/th/completed_female.mp3?v=8");
+    audio.preload = "auto";
+    audio.defaultPlaybackRate = 1.12;
+    audio.playbackRate = 1.12;
+    audio.setAttribute("playsinline", "true");
+    audio.load();
+    completionAudioRef.current = audio;
+
+    const currentState = window.history.state && typeof window.history.state === "object" ? window.history.state : {};
+    window.history.replaceState({ ...currentState, chatposOrderStage: "menu" }, "", window.location.href);
+    const handlePopState = (event: PopStateEvent) => {
+      const nextStage = event.state?.chatposOrderStage;
+      setStage(nextStage === "review" || nextStage === "success" ? nextStage : "menu");
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    };
+    window.addEventListener("popstate", handlePopState);
+
+    return () => {
+      window.removeEventListener("popstate", handlePopState);
+      audio.pause();
+      completionAudioRef.current = null;
+      if ("speechSynthesis" in window) window.speechSynthesis.cancel();
+    };
+  }, []);
 
   const searchTerms = useMemo(() => search.trim().toLocaleLowerCase("th-TH").split(/\s+/).filter(Boolean), [search]);
   const searchedProducts = useMemo(() => (context?.products ?? []).filter((product) => {
@@ -81,9 +120,93 @@ export default function TableOrderPage() {
     setCart((current) => current.map((item) => item.id === id ? { ...item, quantity: item.quantity + delta } : item).filter((item) => item.quantity > 0));
   };
 
+  const playCompletionFallback = () => {
+    const audio = completionAudioRef.current;
+    if (!audio) return;
+    audio.pause();
+    audio.muted = false;
+    audio.volume = 1;
+    audio.currentTime = 0;
+    audio.playbackRate = 1.12;
+    void audio.play().catch(() => {
+      toast.error("LINE ปิดเสียงอยู่ กรุณาเพิ่มเสียงสื่อแล้วกดฟังอีกครั้ง");
+    });
+  };
+
+  const primeCompletionAudio = () => {
+    const audio = completionAudioRef.current;
+    if (!audio) return;
+    audio.muted = true;
+    audio.currentTime = 0;
+    void audio.play().then(() => {
+      window.setTimeout(() => {
+        if (!audio.muted) return;
+        audio.pause();
+        audio.currentTime = 0;
+        audio.muted = false;
+      }, 80);
+    }).catch(() => {
+      audio.muted = false;
+    });
+  };
+
+  const announceOrderSent = () => {
+    if (
+      typeof window === "undefined" ||
+      !("speechSynthesis" in window) ||
+      typeof window.SpeechSynthesisUtterance !== "function"
+    ) {
+      playCompletionFallback();
+      return;
+    }
+
+    const synth = window.speechSynthesis;
+    const utterance = new window.SpeechSynthesisUtterance(orderSentMessage);
+    utterance.lang = "th-TH";
+    utterance.rate = 1.08;
+    utterance.pitch = 1;
+    utterance.volume = 1;
+    const thaiVoice = synth.getVoices().find((voice) => voice.lang.toLowerCase().startsWith("th"));
+    if (thaiVoice) utterance.voice = thaiVoice;
+
+    let started = false;
+    const fallbackTimer = window.setTimeout(() => {
+      if (!started) playCompletionFallback();
+    }, 1100);
+    utterance.onstart = () => {
+      started = true;
+      window.clearTimeout(fallbackTimer);
+    };
+    utterance.onerror = () => {
+      window.clearTimeout(fallbackTimer);
+      playCompletionFallback();
+    };
+    if (synth.speaking || synth.pending) synth.cancel();
+    window.setTimeout(() => synth.speak(utterance), 60);
+  };
+
+  const openReview = () => {
+    if (!cart.length) return;
+    window.history.pushState({ chatposOrderStage: "review" }, "", window.location.href);
+    setStage("review");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const returnToMenu = () => {
+    if (window.history.state?.chatposOrderStage === "review") {
+      window.history.back();
+      return;
+    }
+    setStage("menu");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
   const submitOrder = async () => {
     if (!cart.length || !context) return;
+    primeCompletionAudio();
     if (!requestIdRef.current) requestIdRef.current = crypto.randomUUID();
+    const submittedItems = cart.map((item) => ({ ...item }));
+    const submittedNote = note.trim();
     setSubmitting(true);
     try {
       const response = await fetch("/api/order", {
@@ -102,10 +225,15 @@ export default function TableOrderPage() {
         orderNumber: payload.order.orderNumber,
         tableName: payload.order.tableName || context.table.name,
         total: Number(payload.order.total ?? total),
+        items: submittedItems,
+        note: submittedNote,
       });
       setCart([]);
       setNote("");
+      setStage("success");
+      window.history.replaceState({ chatposOrderStage: "success" }, "", window.location.href);
       window.scrollTo({ top: 0, behavior: "smooth" });
+      window.setTimeout(announceOrderSent, 260);
     } catch (reason) {
       toast.error(reason instanceof Error ? reason.message : "ส่งออเดอร์ไม่สำเร็จ กรุณาลองอีกครั้ง");
     } finally {
@@ -116,25 +244,82 @@ export default function TableOrderPage() {
   const orderAgain = () => {
     requestIdRef.current = "";
     setCompletedOrder(null);
+    setStage("menu");
     setSearch("");
     setCategory("ทั้งหมด");
+    window.history.replaceState({ chatposOrderStage: "menu" }, "", window.location.href);
+    window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   if (loading) return <div className="customer-order-shell"><div className="customer-order-loading"><Sparkles /><strong>กำลังเปิดเมนูของโต๊ะ...</strong></div></div>;
   if (error || !context) return <div className="customer-order-shell"><div className="customer-order-error"><X /><strong>เปิดลิงก์สั่งอาหารไม่ได้</strong><p>{error || "ไม่พบข้อมูลโต๊ะ"}</p></div></div>;
 
-  if (completedOrder) {
+  if (stage === "success" && completedOrder) {
     return (
       <div className="customer-order-shell">
         <main className="customer-success-card">
           <span><CheckCircle2 /></span>
           <small>CHATPOS TABLE ORDER</small>
-          <h1>ส่งออเดอร์เรียบร้อยแล้ว</h1>
-          <div><UtensilsCrossed /><strong>{completedOrder.tableName}</strong></div>
-          <p>ออเดอร์ <b>#{completedOrder.orderNumber}</b><br />ร้านได้รับรายการของคุณแล้ว</p>
-          <strong className="customer-success-total">฿{money.format(completedOrder.total)}</strong>
-          <button type="button" onClick={orderAgain}><Plus /> สั่งอาหารเพิ่ม</button>
+          <h1>ส่งเมนูเรียบร้อยแล้ว</h1>
+          <div className="customer-success-table"><UtensilsCrossed /><strong>{completedOrder.tableName}</strong></div>
+          <p className="customer-success-message">รออาหารสักครู่ค่ะ<br /><b>ออเดอร์ #{completedOrder.orderNumber}</b></p>
+
+          <section className="customer-success-summary" aria-label="สรุปรายการที่ส่งแล้ว">
+            <div className="customer-success-summary-title"><ClipboardCheck /><strong>สรุปเมนูที่ส่งแล้ว</strong></div>
+            {completedOrder.items.map((item) => (
+              <div className="customer-success-item" key={item.id}>
+                <span><b>{item.quantity} ×</b> {item.name}</span>
+                <strong>฿{money.format(item.price * item.quantity)}</strong>
+              </div>
+            ))}
+            {completedOrder.note && <p className="customer-success-note"><b>หมายเหตุ:</b> {completedOrder.note}</p>}
+            <div className="customer-success-total"><span>ยอดรวม</span><strong>฿{money.format(completedOrder.total)}</strong></div>
+          </section>
+
+          <button type="button" className="customer-success-voice" onClick={announceOrderSent}><Volume2 /> ฟังข้อความอีกครั้ง</button>
+          <button type="button" className="customer-success-order-again" onClick={orderAgain}><Plus /> สั่งอาหารเพิ่ม</button>
         </main>
+        <Toaster position="top-center" richColors />
+      </div>
+    );
+  }
+
+  if (stage === "review") {
+    return (
+      <div className="customer-order-shell">
+        <header className="customer-order-header customer-review-header">
+          <button type="button" onClick={returnToMenu} disabled={submitting} aria-label="กลับไปเลือกเมนู"><ArrowLeft /></button>
+          <div><ClipboardCheck /><span><small>{context.merchant}</small><strong>ตรวจรายการที่สั่ง</strong></span></div>
+          <b><UtensilsCrossed /> {context.table.name}</b>
+        </header>
+
+        <main className="customer-review-main">
+          <section className="customer-review-hero">
+            <span><ShoppingBasket /></span>
+            <div><small>ก่อนส่งรายการให้ร้าน</small><h1>ตรวจเมนูให้เรียบร้อย</h1><p>หากต้องการแก้ไข กด “สั่งเพิ่ม” เพื่อกลับไปหน้าเมนู</p></div>
+          </section>
+
+          <section className="customer-review-card">
+            <div className="customer-review-title"><h2>สรุปรายการ</h2><span>{itemCount} รายการ</span></div>
+            <div className="customer-review-items">
+              {cart.map((item) => (
+                <div className="customer-review-item" key={item.id}>
+                  <span><b>{item.quantity} ×</b><strong>{item.name}</strong></span>
+                  <strong>฿{money.format(item.price * item.quantity)}</strong>
+                </div>
+              ))}
+            </div>
+            {note.trim() && <div className="customer-review-note"><small>หมายเหตุถึงร้าน</small><p>{note.trim()}</p></div>}
+            <div className="customer-review-total"><span>ยอดรวม · {context.table.name}</span><strong>฿{money.format(total)}</strong></div>
+          </section>
+
+          <div className="customer-review-actions">
+            <button type="button" className="customer-review-more" onClick={returnToMenu} disabled={submitting}><Plus /> สั่งเพิ่ม</button>
+            <button type="button" className="customer-review-submit" onClick={() => void submitOrder()} disabled={submitting || !cart.length}><Send /> {submitting ? "กำลังส่งเมนู..." : "ส่งเมนูที่สั่ง"}</button>
+          </div>
+          <p className="customer-review-help">เมื่อกดส่ง ร้านจะได้รับรายการพร้อมหมายเลขโต๊ะทันที</p>
+        </main>
+        <Toaster position="top-center" richColors />
       </div>
     );
   }
@@ -190,7 +375,7 @@ export default function TableOrderPage() {
           ))}
           <label className="customer-order-note"><span>หมายเหตุถึงร้าน</span><textarea value={note} onChange={(event) => setNote(event.target.value)} maxLength={300} rows={3} placeholder="เช่น ไม่เผ็ด ไม่ใส่ผัก" /></label>
           <div className="customer-order-total"><span>ยอดรวม · {context.table.name}</span><strong>฿{money.format(total)}</strong></div>
-          <button type="button" className="customer-submit-order" disabled={!cart.length || submitting} onClick={submitOrder}><Send /> {submitting ? "กำลังส่งออเดอร์..." : `ยืนยันสั่งอาหาร · ${context.table.name}`}</button>
+          <button type="button" className="customer-submit-order" disabled={!cart.length} onClick={openReview}><Send /> ส่งเมนูที่สั่ง</button>
         </section>
       </main>
 
