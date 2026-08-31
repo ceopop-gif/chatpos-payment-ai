@@ -32,6 +32,7 @@ import {
   RotateCcw,
   Save,
   Search,
+  Send,
   Settings,
   ShieldCheck,
   ShoppingBasket,
@@ -116,7 +117,7 @@ type RestaurantTable = {
 type TableOrder = {
   id: string;
   orderNumber: string;
-  status: "new" | "done";
+  status: "new" | "accepted" | "kitchen_received" | "done";
   total: number;
   note: string;
   createdAt: string;
@@ -615,7 +616,7 @@ export default function HomePage() {
       return left.id - right.id;
     });
   }, [tableSearch, tables]);
-  const newTableOrders = useMemo(() => tableOrders.filter((order) => order.status === "new"), [tableOrders]);
+  const activeTableOrders = useMemo(() => tableOrders.filter((order) => order.status !== "done"), [tableOrders]);
   const doneTableOrders = useMemo(() => tableOrders.filter((order) => order.status === "done"), [tableOrders]);
 
   useEffect(() => {
@@ -1224,6 +1225,30 @@ export default function HomePage() {
     }
   };
 
+  const orderHandoffLink = (order: TableOrder) => {
+    if (typeof window === "undefined") return `/handoff/${order.id}`;
+    return `${window.location.origin}/handoff/${order.id}`;
+  };
+
+  const shareOrderToLine = (order: TableOrder) => {
+    const itemSummary = order.items.map((item) => `${item.name} x ${item.quantity}`).join(", ");
+    const message = [
+      `ใบสั่งอาหาร #${order.orderNumber}`,
+      `${order.tableName} · ยอด ฿${money.format(order.total)}`,
+      itemSummary,
+      "เปิดใบสั่งเพื่อกดรับเรื่องและรับอาหารจากครัว",
+      orderHandoffLink(order),
+    ].join("\n");
+    window.location.href = `https://line.me/R/share?text=${encodeURIComponent(message)}`;
+  };
+
+  const orderStatusLabel = (status: TableOrder["status"]) => ({
+    new: "รอรับเรื่อง",
+    accepted: "รับเรื่องแล้ว",
+    kitchen_received: "รับอาหารจากครัวแล้ว",
+    done: "เสร็จแล้ว",
+  })[status];
+
   const go = (next: View) => {
     if (next === view) return;
     cancelSpeech();
@@ -1791,13 +1816,21 @@ export default function HomePage() {
       <main className="screen content-screen">
         <ScreenTitle title="ออเดอร์จากโต๊ะ" subtitle="อัปเดตอัตโนมัติทุก 3 วินาที พร้อมระบุโต๊ะจากลิงก์ที่ลูกค้าเปิด" />
         <Tabs defaultValue="new" className="orders-tabs">
-          <TabsList><TabsTrigger value="new">ออเดอร์ใหม่ {newTableOrders.length}</TabsTrigger><TabsTrigger value="done">เสร็จแล้ว {doneTableOrders.length}</TabsTrigger></TabsList>
+          <TabsList><TabsTrigger value="new">กำลังดำเนินการ {activeTableOrders.length}</TabsTrigger><TabsTrigger value="done">เสร็จแล้ว {doneTableOrders.length}</TabsTrigger></TabsList>
           <TabsContent value="new" className="order-stack">
-            {ordersLoading && !newTableOrders.length ? <div className="order-loading"><Sparkles /> กำลังตรวจสอบออเดอร์ใหม่...</div> : newTableOrders.length ? newTableOrders.map((order) => (
+            {ordersLoading && !activeTableOrders.length ? <div className="order-loading"><Sparkles /> กำลังตรวจสอบออเดอร์ใหม่...</div> : activeTableOrders.length ? activeTableOrders.map((order) => (
               <article className="order-card table-order-card" key={order.id}>
                 <div className="order-top"><span>#{order.orderNumber}</span><b>{order.tableName}</b></div>
+                <span className={`table-order-status ${order.status}`}>{orderStatusLabel(order.status)}</span>
                 <p>{order.items.map((item) => `${item.name} × ${item.quantity}`).join(", ")}</p>
                 {order.note && <aside><strong>หมายเหตุ:</strong> {order.note}</aside>}
+                <div className="order-handoff-row">
+                  <span><strong>ใบสั่งสำหรับผู้รับอาหาร</strong><small>ส่งลิงก์ให้ผู้รับกดรับเรื่องและรับอาหารจากครัว</small></span>
+                  <div>
+                    <button type="button" className="order-line-button" onClick={() => shareOrderToLine(order)}><Send /> ส่งไป LINE</button>
+                    <a href={orderHandoffLink(order)} target="_blank" rel="noreferrer"><ExternalLink /> เปิดใบสั่ง</a>
+                  </div>
+                </div>
                 <div className="table-order-footer">
                   <strong>฿{money.format(order.total)}</strong>
                   <span className="table-order-actions">

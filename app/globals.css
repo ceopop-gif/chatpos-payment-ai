@@ -1105,6 +1105,17 @@ body { background: #071b18; }
 .order-loading { min-height: 150px; display: flex; align-items: center; justify-content: center; gap: 9px; color: #61746d; font-size: 14px; font-weight: 800; }
 .order-loading svg { width: 23px; height: 23px; color: #6a59d0; }
 .table-order-card aside { margin: -3px 0 12px; border-radius: 11px; padding: 9px 10px; color: #694f20; background: #fff6dd; font-size: 12px; line-height: 1.45; }
+.table-order-status { width: fit-content; display: inline-flex; align-items: center; margin-top: 10px; border-radius: 999px; padding: 6px 9px; color: #8a5b00; background: #fff4d3; font-size: 11px; font-weight: 900; }
+.table-order-status.accepted { color: #235fc4; background: #e9f0ff; }
+.table-order-status.kitchen_received { color: #087b59; background: #e5f7f0; }
+.order-handoff-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px; margin: 0 0 12px; border: 1px solid #bfe4d7; border-radius: 14px; padding: 11px; background: linear-gradient(135deg, #edf9f4, #eef3ff); }
+.order-handoff-row > span { min-width: 0; display: flex; flex-direction: column; }
+.order-handoff-row > span strong { color: #173d33; font-size: 13px; font-weight: 900; }
+.order-handoff-row > span small { margin-top: 3px; color: #6c7f78; font-size: 10px; line-height: 1.4; }
+.order-handoff-row > div { display: flex; gap: 6px; }
+.order-handoff-row > div .order-line-button { color: white; background: #06a64b; }
+.order-handoff-row > div a { min-height: 38px; display: flex; align-items: center; justify-content: center; gap: 4px; border: 1px solid #c7d9d2; border-radius: 11px; padding: 8px 9px; color: #246f5a; background: white; font-size: 11px; font-weight: 900; text-decoration: none; white-space: nowrap; }
+.order-handoff-row svg { width: 17px; height: 17px; }
 .table-order-card .table-order-footer { gap: 10px; }
 .table-order-actions { display: flex; gap: 7px; }
 .table-order-actions .order-done-button { color: #157a5c; background: #e5f7f0; }
@@ -1323,6 +1334,95 @@ body { background: #071b18; }
 .customer-success-card > button { width: min(100%, 340px); min-height: 56px; display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 22px; border: 0; border-radius: 16px; color: white; background: linear-gradient(135deg, #00a977, #4078ea); box-shadow: 0 11px 24px rgba(64,120,234,.24); cursor: pointer; font-size: 17px; font-weight: 900; }
 .customer-success-card > button svg { width: 21px; height: 21px; }
 
+/* Shared order handoff: LINE receiver workflow */
+.handoff-shell {
+  min-height: 100dvh;
+  width: min(100%, 560px);
+  margin: 0 auto;
+  overflow-x: hidden;
+  color: #15392f;
+  background:
+    radial-gradient(circle at 100% 4%, rgba(62,121,235,.14), transparent 20rem),
+    radial-gradient(circle at 0% 42%, rgba(0,181,130,.12), transparent 21rem),
+    #f3f8f6;
+  box-shadow: 0 0 0 1px rgba(7,70,55,.05), 0 24px 80px rgba(7,27,24,.18);
+}
+.handoff-header { position: sticky; top: 0; z-index: 20; min-height: 84px; display: grid; grid-template-columns: 48px minmax(0, 1fr) auto; align-items: center; gap: 9px; padding: max(13px, env(safe-area-inset-top)) 14px 13px; color: white; background: radial-gradient(circle at 92% 0%, rgba(71,122,237,.4), transparent 48%), linear-gradient(135deg, #062e27, #075849); box-shadow: 0 8px 25px rgba(7,27,24,.22); }
+.handoff-header > button { width: 44px; height: 44px; display: grid; place-items: center; border: 1px solid rgba(255,255,255,.14); border-radius: 14px; color: white; background: rgba(255,255,255,.08); cursor: pointer; }
+.handoff-header > button svg { width: 25px; height: 25px; }
+.handoff-header > span { min-width: 0; display: flex; flex-direction: column; }
+.handoff-header > span small { color: rgba(222,255,244,.63); font-size: 9px; font-weight: 900; letter-spacing: .12em; }
+.handoff-header > span strong { margin-top: 2px; font-size: 20px; font-weight: 900; }
+.handoff-header > b { min-height: 42px; display: flex; align-items: center; gap: 5px; border: 1px solid rgba(255,255,255,.15); border-radius: 13px; padding: 8px 10px; color: white; background: rgba(255,255,255,.1); font-size: 14px; font-weight: 900; white-space: nowrap; }
+.handoff-header > b svg { width: 18px; height: 18px; color: #8df1cf; }
+.handoff-main { padding: 15px 13px max(30px, env(safe-area-inset-bottom)); }
+.handoff-status-card { display: grid; grid-template-columns: 62px minmax(0, 1fr); align-items: center; gap: 13px; border: 1px solid #efd79a; border-radius: 22px; padding: 16px; background: linear-gradient(145deg, #fff9e9, #fff2cc); box-shadow: 0 10px 25px rgba(7,27,24,.08); }
+.handoff-status-card > span { width: 60px; height: 60px; display: grid; place-items: center; border-radius: 18px; color: white; background: linear-gradient(145deg, #efae24, #e8751b); box-shadow: 0 9px 20px rgba(232,117,27,.24); }
+.handoff-status-card > span svg { width: 31px; height: 31px; }
+.handoff-status-card small { color: #8e6b21; font-size: 10px; font-weight: 900; letter-spacing: .06em; }
+.handoff-status-card h1 { margin: 3px 0 0; color: #473510; font-size: 22px; line-height: 1.25; font-weight: 900; }
+.handoff-status-card p { margin: 4px 0 0; color: #806b3c; font-size: 12px; line-height: 1.5; }
+.handoff-status-card.accepted { border-color: #bfd4ff; background: linear-gradient(145deg, #f0f5ff, #e6eeff); }
+.handoff-status-card.accepted > span { background: linear-gradient(145deg, #3f80ec, #6759db); box-shadow: 0 9px 20px rgba(63,128,236,.25); }
+.handoff-status-card.accepted small, .handoff-status-card.accepted p { color: #526eab; }
+.handoff-status-card.accepted h1 { color: #213f7b; }
+.handoff-status-card.kitchen_received, .handoff-status-card.done { border-color: #b9e4d4; background: linear-gradient(145deg, #effbf6, #e2f7ef); }
+.handoff-status-card.kitchen_received > span, .handoff-status-card.done > span { background: linear-gradient(145deg, #00aa78, #087655); box-shadow: 0 9px 20px rgba(0,170,120,.23); }
+.handoff-status-card.kitchen_received small, .handoff-status-card.kitchen_received p, .handoff-status-card.done small, .handoff-status-card.done p { color: #4d7668; }
+.handoff-status-card.kitchen_received h1, .handoff-status-card.done h1 { color: #155945; }
+.handoff-order-card { margin-top: 13px; overflow: hidden; border: 1px solid rgba(7,102,78,.14); border-radius: 22px; padding: 15px; background: rgba(255,255,255,.97); box-shadow: 0 12px 27px rgba(7,27,24,.09); }
+.handoff-order-head { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding-bottom: 13px; border-bottom: 1px solid #e8efec; }
+.handoff-order-head > span { min-width: 0; display: grid; grid-template-columns: 32px minmax(0, 1fr); column-gap: 8px; align-items: center; }
+.handoff-order-head > span svg { grid-row: 1 / span 2; width: 31px; height: 31px; border-radius: 10px; padding: 7px; color: #087b59; background: #e5f7f0; }
+.handoff-order-head small { overflow: hidden; color: #788a83; font-size: 9px; font-weight: 800; text-overflow: ellipsis; white-space: nowrap; }
+.handoff-order-head strong { overflow: hidden; color: #173d33; font-size: 12px; font-weight: 900; text-overflow: ellipsis; white-space: nowrap; }
+.handoff-items { padding: 7px 0; }
+.handoff-items > div { min-height: 58px; display: flex; align-items: center; justify-content: space-between; gap: 10px; border-bottom: 1px solid #edf2ef; padding: 8px 0; }
+.handoff-items > div:last-child { border-bottom: 0; }
+.handoff-items > div > span { min-width: 0; display: flex; align-items: center; gap: 9px; }
+.handoff-items > div > span b { flex: 0 0 auto; width: 34px; height: 34px; display: grid; place-items: center; border-radius: 11px; color: white; background: linear-gradient(145deg, #00a977, #4078ea); font-size: 14px; }
+.handoff-items > div > span strong { overflow: hidden; font-size: 15px; font-weight: 900; text-overflow: ellipsis; white-space: nowrap; }
+.handoff-items > div > strong { flex: 0 0 auto; color: #168762; font-size: 14px; font-weight: 900; }
+.handoff-order-card aside { border-radius: 13px; padding: 11px; color: #684e1d; background: #fff5d8; }
+.handoff-order-card aside strong { font-size: 12px; font-weight: 900; }
+.handoff-order-card aside p { margin: 4px 0 0; font-size: 13px; line-height: 1.45; }
+.handoff-total { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 9px; border-top: 1px solid #e8efec; padding-top: 13px; }
+.handoff-total span { color: #62766e; font-size: 12px; font-weight: 800; }
+.handoff-total strong { color: #07835e; font-size: 25px; font-weight: 900; }
+.handoff-progress { display: grid; grid-template-columns: 1fr 22px 1fr; align-items: center; gap: 5px; margin: 13px 0; border: 1px solid #dbe7e2; border-radius: 19px; padding: 13px; background: rgba(255,255,255,.86); }
+.handoff-progress > div { min-width: 0; display: flex; align-items: center; gap: 8px; opacity: .5; }
+.handoff-progress > div.active, .handoff-progress > div.done { opacity: 1; }
+.handoff-progress > div > span { flex: 0 0 auto; width: 34px; height: 34px; display: grid; place-items: center; border: 2px solid #c7d8d2; border-radius: 999px; color: #71847d; background: white; font-size: 13px; font-weight: 900; }
+.handoff-progress > div.active > span { border-color: #4078ea; color: white; background: #4078ea; }
+.handoff-progress > div.done > span { border-color: #00a977; color: white; background: #00a977; }
+.handoff-progress > div > span svg { width: 17px; height: 17px; }
+.handoff-progress p { min-width: 0; display: flex; flex-direction: column; margin: 0; }
+.handoff-progress p strong { font-size: 12px; font-weight: 900; }
+.handoff-progress p small { overflow: hidden; margin-top: 2px; color: #768780; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.handoff-progress > i { height: 2px; background: #cddbd6; }
+.handoff-primary-button { width: 100%; min-height: 62px; display: flex; align-items: center; justify-content: center; gap: 9px; border: 0; border-radius: 18px; color: white; background: linear-gradient(135deg, #00a977, #3978e9 65%, #725edc); box-shadow: 0 12px 27px rgba(57,120,233,.27); cursor: pointer; font-size: 19px; font-weight: 900; }
+.handoff-primary-button.kitchen { color: #17372f; background: linear-gradient(135deg, #ffe589, #f5bd3f 60%, #e89d23); box-shadow: 0 12px 27px rgba(232,157,35,.25); }
+.handoff-primary-button:disabled { cursor: wait; opacity: .6; box-shadow: none; }
+.handoff-primary-button svg { width: 27px; height: 27px; }
+.handoff-complete { min-height: 69px; display: flex; align-items: center; justify-content: center; gap: 10px; border: 1px solid #b7e4d3; border-radius: 18px; padding: 12px; color: #0b7253; background: #e7f8f1; }
+.handoff-complete > svg { width: 34px; height: 34px; }
+.handoff-complete > span { display: flex; flex-direction: column; }
+.handoff-complete strong { font-size: 15px; font-weight: 900; }
+.handoff-complete small { margin-top: 3px; color: #5d7b70; font-size: 10px; }
+.handoff-share { margin-top: 13px; border: 1px solid #dce7e2; border-radius: 18px; padding: 12px; background: rgba(255,255,255,.83); }
+.handoff-share p { margin: 0 0 9px; color: #60736c; font-size: 12px; font-weight: 800; text-align: center; }
+.handoff-share > div { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.handoff-share button { min-height: 48px; display: flex; align-items: center; justify-content: center; gap: 6px; border: 0; border-radius: 14px; color: #256e59; background: #e8f5f0; cursor: pointer; font-size: 13px; font-weight: 900; }
+.handoff-share button:first-child { color: white; background: #06a64b; }
+.handoff-share button svg { width: 20px; height: 20px; }
+.handoff-loading, .handoff-error { min-height: 100dvh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 28px; text-align: center; }
+.handoff-loading > svg, .handoff-error > svg { width: 58px; height: 58px; margin-bottom: 13px; color: #3c8f75; }
+.handoff-loading > svg { animation: payment-check-spin .9s linear infinite; }
+.handoff-loading strong, .handoff-error strong { color: #15392f; font-size: 19px; }
+.handoff-error p { margin: 7px 0 14px; color: #71817c; }
+.handoff-error button { min-height: 49px; display: flex; align-items: center; gap: 7px; border: 0; border-radius: 14px; padding: 9px 16px; color: white; background: linear-gradient(135deg, #00a977, #4078ea); font-weight: 900; }
+.handoff-error button svg { width: 19px; height: 19px; }
+
 @keyframes ai-pulse { 50% { opacity: .55; transform: scale(.8); } }
 @keyframes ai-orbit { to { transform: rotate(360deg); } }
 @keyframes ai-shimmer { 0%, 72%, 100% { transform: translateX(-110%); } 88% { transform: translateX(110%); } }
@@ -1348,12 +1448,19 @@ body { background: #071b18; }
   .table-order-card .table-order-footer { align-items: flex-start; flex-direction: column; }
   .table-order-actions { width: 100%; }
   .table-order-actions button { flex: 1; justify-content: center; }
+  .order-handoff-row { grid-template-columns: 1fr; }
+  .order-handoff-row > div { display: grid; grid-template-columns: 1fr 1fr; }
+  .order-handoff-row > div button, .order-handoff-row > div a { justify-content: center; }
   .customer-order-header > div small { display: none; }
   .customer-order-header > div strong { font-size: 16px; }
   .customer-order-header > b { padding-inline: 9px; font-size: 13px; }
   .customer-product-image { height: 103px; }
   .customer-product-copy { min-height: 125px; padding-inline: 9px; }
   .customer-product-copy strong { font-size: 15px; }
+  .handoff-header { grid-template-columns: 44px minmax(0, 1fr); }
+  .handoff-header > b { grid-column: 2; justify-self: start; min-height: 34px; padding: 5px 8px; }
+  .handoff-progress { grid-template-columns: 1fr; }
+  .handoff-progress > i { width: 2px; height: 15px; margin-left: 16px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1362,4 +1469,5 @@ body { background: #071b18; }
   .voice-check.voice-speaking > span svg { animation: none; }
   .scan-beam { animation: none; }
   .table-view-orders > span { animation: none; }
+  .handoff-loading > svg { animation: none; }
 }

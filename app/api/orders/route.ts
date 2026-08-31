@@ -43,7 +43,7 @@ export async function PATCH(request: Request) {
     const payload = (await request.json()) as { id?: string; status?: string };
     const id = String(payload.id ?? "");
     const status = String(payload.status ?? "");
-    if (!id || !["new", "done"].includes(status)) return Response.json({ error: "ข้อมูลไม่ถูกต้อง" }, { status: 400 });
+    if (!id || !["new", "accepted", "kitchen_received", "done"].includes(status)) return Response.json({ error: "ข้อมูลไม่ถูกต้อง" }, { status: 400 });
     const result = await getD1().prepare(
       "UPDATE table_orders SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? RETURNING id, status"
     ).bind(status, id).first();
