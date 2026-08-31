@@ -14,6 +14,7 @@ import {
   ChevronRight,
   CircleDollarSign,
   ClipboardList,
+  Copy,
   CreditCard,
   ExternalLink,
   Grid2X2,
@@ -34,6 +35,7 @@ import {
   Settings,
   ShieldCheck,
   ShoppingBasket,
+  Share2,
   Sparkles,
   Store,
   Trash2,
@@ -97,6 +99,29 @@ type Product = {
 };
 
 type CartItem = Pick<Product, "id" | "name" | "price"> & { qty: number };
+
+type RestaurantTable = {
+  id: number;
+  name: string;
+  token: string;
+  active: boolean;
+  orderTotal: number;
+  orderCount: number;
+  createdAt: string;
+};
+
+type TableOrder = {
+  id: string;
+  orderNumber: string;
+  status: "new" | "done";
+  total: number;
+  note: string;
+  createdAt: string;
+  updatedAt: string;
+  tableId: number;
+  tableName: string;
+  items: Array<{ productId: number; name: string; price: number; quantity: number }>;
+};
 
 const methods: Record<PaymentMethod, { name: string; short: string; icon: typeof QrCode; tone: string; action: string }> = {
   promptpay: { name: "QR PromptPay", short: "พร้อมเพย์", icon: QrCode, tone: "green", action: "สร้าง QR" },
@@ -346,7 +371,7 @@ function Header({ title, onBack }: { title?: string; onBack?: () => void }) {
 function BottomNav({ view, go }: { view: View; go: (view: View) => void }) {
   const nav = [
     { key: "orders" as View, label: "ออเดอร์", icon: ClipboardList },
-    { key: "tables" as View, label: "จ่ายที่โต๊ะ", icon: UtensilsCrossed },
+    { key: "tables" as View, label: "จัดการโต๊ะ", icon: UtensilsCrossed },
     { key: "home" as View, label: "หน้าหลัก", icon: Home, center: true },
     { key: "pos" as View, label: "POS", icon: ShoppingBasket },
     { key: "settings" as View, label: "ตั้งค่า", icon: Settings },
@@ -406,6 +431,13 @@ export default function HomePage() {
   const [productDescription, setProductDescription] = useState("");
   const [productImage, setProductImage] = useState<string | null>(null);
   const [productActive, setProductActive] = useState(true);
+  const [tables, setTables] = useState<RestaurantTable[]>([]);
+  const [tablesLoading, setTablesLoading] = useState(false);
+  const [newTableName, setNewTableName] = useState("");
+  const [tableSearch, setTableSearch] = useState("");
+  const [addingTable, setAddingTable] = useState(false);
+  const [tableOrders, setTableOrders] = useState<TableOrder[]>([]);
+  const [ordersLoading, setOrdersLoading] = useState(false);
   const [paymentContext, setPaymentContext] = useState("รับชำระทั่วไป");
   const [withdrawText, setWithdrawText] = useState("");
   const [bankAccount, setBankAccount] = useState("main");
@@ -426,6 +458,8 @@ export default function HomePage() {
   const productFormRef = useRef<HTMLFormElement | null>(null);
   const productStorageErrorRef = useRef(false);
   const categoryStorageErrorRef = useRef(false);
+  const menuSyncReadyRef = useRef(false);
+  const menuSyncTimerRef = useRef<number | null>(null);
 
   const amount = Number(amountText || 0);
   const cartTotal = useMemo(() => cart.reduce((sum, item) => sum + item.price * item.qty, 0), [cart]);
@@ -449,6 +483,12 @@ export default function HomePage() {
     () => posCategory === "ทั้งหมด" ? searchMatchedProducts : searchMatchedProducts.filter((product) => product.category === posCategory),
     [searchMatchedProducts, posCategory],
   );
+  const filteredTables = useMemo(() => {
+    const term = tableSearch.trim().toLocaleLowerCase("th-TH");
+    return term ? tables.filter((table) => table.name.toLocaleLowerCase("th-TH").includes(term)) : tables;
+  }, [tableSearch, tables]);
+  const newTableOrders = useMemo(() => tableOrders.filter((order) => order.status === "new"), [tableOrders]);
+  const doneTableOrders = useMemo(() => tableOrders.filter((order) => order.status === "done"), [tableOrders]);
 
   useEffect(() => {
     try {
@@ -525,6 +565,78 @@ export default function HomePage() {
       }
     }
   }, [categories, categoriesReady]);
+
+  useEffect(() => {
+    if (!catalogReady || !categoriesReady || menuSyncReadyRef.current) return;
+    let active = true;
+    const initializeSharedMenu = async () => {
+      try {
+        const hasLocalCatalog = Boolean(window.localStorage.getItem(PRODUCT_STORAGE_KEY));
+        const response = await fetch("/api/menu", { cache: "no-store" });
+        const payload = await response.json() as { products?: Product[]; categories?: string[]; persisted?: boolean };
+        if (!active) return;
+        if (!hasLocalCatalog && response.ok && payload.persisted && payload.products?.length) {
+          setCatalog(payload.products);
+          if (payload.categories?.length) setCategories(payload.categories);
+        } else {
+          await fetch("/api/menu", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ products: catalog, categories }),
+          });
+        }
+      } catch {
+        // The local POS remains usable while the shared menu is temporarily unavailable.
+      } finally {
+        if (active) menuSyncReadyRef.current = true;
+      }
+    };
+    void initializeSharedMenu();
+    return () => { active = false; };
+  }, [catalogReady, categoriesReady]);
+
+  useEffect(() => {
+    if (!menuSyncReadyRef.current || !catalogReady || !categoriesReady) return;
+    if (menuSyncTimerRef.current !== null) window.clearTimeout(menuSyncTimerRef.current);
+    menuSyncTimerRef.current = window.setTimeout(() => {
+      void fetch("/api/menu", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ products: catalog, categories }),
+      }).catch(() => undefined);
+    }, 700);
+    return () => {
+      if (menuSyncTimerRef.current !== null) window.clearTimeout(menuSyncTimerRef.current);
+    };
+  }, [catalog, catalogReady, categories, categoriesReady]);
+
+  useEffect(() => {
+    if (view !== "tables" && view !== "orders") return;
+    let active = true;
+    const refresh = async () => {
+      try {
+        const [tableResponse, orderResponse] = await Promise.all([
+          fetch("/api/tables", { cache: "no-store" }),
+          fetch("/api/orders", { cache: "no-store" }),
+        ]);
+        const tablePayload = await tableResponse.json() as { tables?: RestaurantTable[] };
+        const orderPayload = await orderResponse.json() as { orders?: TableOrder[] };
+        if (!active) return;
+        if (tableResponse.ok && tablePayload.tables) setTables(tablePayload.tables);
+        if (orderResponse.ok && orderPayload.orders) setTableOrders(orderPayload.orders);
+      } finally {
+        if (active) {
+          setTablesLoading(false);
+          setOrdersLoading(false);
+        }
+      }
+    };
+    setTablesLoading(true);
+    setOrdersLoading(true);
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), 6000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [view]);
 
   useEffect(() => {
     const inLine = isLineEnvironment();
@@ -753,6 +865,94 @@ export default function HomePage() {
     setVoiceEnabled(true);
     if (!lineAudioMode) playTapTone();
     speakThai("เปิดเสียงภาษาไทยแล้ว", undefined, ["voice_on"]);
+  };
+
+  const tableOrderLink = (table: RestaurantTable) => {
+    if (typeof window === "undefined") return `/order/${table.token}`;
+    return `${window.location.origin}/order/${table.token}`;
+  };
+
+  const copyText = async (value: string) => {
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(value);
+      } else {
+        const input = document.createElement("textarea");
+        input.value = value;
+        input.style.position = "fixed";
+        input.style.opacity = "0";
+        document.body.appendChild(input);
+        input.select();
+        document.execCommand("copy");
+        input.remove();
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  const copyTableLink = async (table: RestaurantTable) => {
+    const copied = await copyText(tableOrderLink(table));
+    copied ? toast.success(`คัดลอกลิงก์ ${table.name} แล้ว`) : toast.error("คัดลอกลิงก์ไม่สำเร็จ กรุณาเปิดใน Chrome");
+  };
+
+  const shareTableLink = async (table: RestaurantTable) => {
+    const url = tableOrderLink(table);
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: `สั่งอาหาร ${table.name}`, text: `เปิดเมนูสั่งอาหารสำหรับ ${table.name}`, url });
+        return;
+      } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+      }
+    }
+    await copyTableLink(table);
+  };
+
+  const createTable = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const name = newTableName.trim().replace(/\s+/g, " ");
+    if (!name) return toast.error("กรุณากรอกชื่อหรือหมายเลขโต๊ะ");
+    setAddingTable(true);
+    try {
+      const response = await fetch("/api/tables", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      const payload = await response.json() as { table?: RestaurantTable; error?: string };
+      if (!response.ok || !payload.table) throw new Error(payload.error || "เพิ่มโต๊ะไม่สำเร็จ");
+      setNewTableName("");
+      const tableResponse = await fetch("/api/tables", { cache: "no-store" });
+      const tablePayload = await tableResponse.json() as { tables?: RestaurantTable[] };
+      if (tableResponse.ok && tablePayload.tables) setTables(tablePayload.tables);
+      toast.success(`สร้าง ${name} และลิงก์สั่งอาหารแล้ว`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "เพิ่มโต๊ะไม่สำเร็จ");
+    } finally {
+      setAddingTable(false);
+    }
+  };
+
+  const markOrderDone = async (order: TableOrder) => {
+    try {
+      const response = await fetch("/api/orders", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ id: order.id, status: "done" }),
+      });
+      if (!response.ok) throw new Error("อัปเดตออเดอร์ไม่สำเร็จ");
+      setTableOrders((current) => current.map((item) => item.id === order.id ? { ...item, status: "done" } : item));
+      setTables((current) => current.map((table) => table.id === order.tableId ? {
+        ...table,
+        orderCount: Math.max(0, table.orderCount - 1),
+        orderTotal: Math.max(0, table.orderTotal - order.total),
+      } : table));
+      toast.success(`ออเดอร์ #${order.orderNumber} เสร็จแล้ว`);
+    } catch {
+      toast.error("อัปเดตออเดอร์ไม่สำเร็จ กรุณาลองอีกครั้ง");
+    }
   };
 
   const go = (next: View) => {
@@ -1302,23 +1502,34 @@ export default function HomePage() {
     <>
       <Header title="ออเดอร์" />
       <main className="screen content-screen">
-        <ScreenTitle title="รายการสั่งซื้อ" subtitle="รับออเดอร์และส่งยอดไปชำระเงินได้ทันที" />
+        <ScreenTitle title="ออเดอร์จากโต๊ะ" subtitle="อัปเดตอัตโนมัติทุก 6 วินาที พร้อมระบุโต๊ะจากลิงก์ที่ลูกค้าเปิด" />
         <Tabs defaultValue="new" className="orders-tabs">
-          <TabsList><TabsTrigger value="new">ออเดอร์ใหม่ 3</TabsTrigger><TabsTrigger value="done">เสร็จแล้ว</TabsTrigger></TabsList>
+          <TabsList><TabsTrigger value="new">ออเดอร์ใหม่ {newTableOrders.length}</TabsTrigger><TabsTrigger value="done">เสร็จแล้ว {doneTableOrders.length}</TabsTrigger></TabsList>
           <TabsContent value="new" className="order-stack">
-            {[
-              { id: "A017", source: "โต๊ะ 7", item: "กะเพราไก่ไข่ดาว × 2, ชาไทย × 1", total: 195 },
-              { id: "D103", source: "เดลิเวอรี่", item: "ข้าวผัดกุ้ง × 2", total: 170 },
-              { id: "P042", source: "สั่งล่วงหน้า", item: "ต้มยำกุ้ง × 1, น้ำเปล่า × 2", total: 190 },
-            ].map((order) => (
-              <article className="order-card" key={order.id}>
-                <div className="order-top"><span>#{order.id}</span><b>{order.source}</b></div>
-                <p>{order.item}</p>
-                <div><strong>฿{money.format(order.total)}</strong><button onClick={() => openMethodPicker(order.total, `ออเดอร์ #${order.id}`)}>รับชำระ <ChevronRight /></button></div>
+            {ordersLoading && !newTableOrders.length ? <div className="order-loading"><Sparkles /> กำลังตรวจสอบออเดอร์ใหม่...</div> : newTableOrders.length ? newTableOrders.map((order) => (
+              <article className="order-card table-order-card" key={order.id}>
+                <div className="order-top"><span>#{order.orderNumber}</span><b>{order.tableName}</b></div>
+                <p>{order.items.map((item) => `${item.name} × ${item.quantity}`).join(", ")}</p>
+                {order.note && <aside><strong>หมายเหตุ:</strong> {order.note}</aside>}
+                <div className="table-order-footer">
+                  <strong>฿{money.format(order.total)}</strong>
+                  <span className="table-order-actions">
+                    <button type="button" className="order-done-button" onClick={() => markOrderDone(order)}><Check /> เสร็จแล้ว</button>
+                    <button type="button" onClick={() => openMethodPicker(order.total, `${order.tableName} · #${order.orderNumber}`)}>รับชำระ <ChevronRight /></button>
+                  </span>
+                </div>
               </article>
-            ))}
+            )) : <div className="empty-state"><ClipboardList /><strong>ยังไม่มีออเดอร์ใหม่</strong><p>เมื่อลูกค้าส่งรายการจากลิงก์ประจำโต๊ะ ออเดอร์จะขึ้นที่นี่อัตโนมัติ</p></div>}
           </TabsContent>
-          <TabsContent value="done"><div className="empty-state"><PackageCheck /><strong>ออเดอร์ที่เสร็จแล้ว</strong><p>รายการที่รับชำระสำเร็จจะย้ายมาแสดงที่นี่</p></div></TabsContent>
+          <TabsContent value="done" className="order-stack">
+            {doneTableOrders.length ? doneTableOrders.map((order) => (
+              <article className="order-card table-order-card done" key={order.id}>
+                <div className="order-top"><span>#{order.orderNumber}</span><b>{order.tableName}</b></div>
+                <p>{order.items.map((item) => `${item.name} × ${item.quantity}`).join(", ")}</p>
+                <div><strong>฿{money.format(order.total)}</strong><small><CheckCircle2 /> เสร็จแล้ว</small></div>
+              </article>
+            )) : <div className="empty-state"><PackageCheck /><strong>ยังไม่มีออเดอร์ที่เสร็จแล้ว</strong><p>กด “เสร็จแล้ว” ในออเดอร์ใหม่เพื่อย้ายรายการมาที่นี่</p></div>}
+          </TabsContent>
         </Tabs>
       </main>
     </>
@@ -1326,18 +1537,43 @@ export default function HomePage() {
 
   const TablesScreen = () => (
     <>
-      <Header title="จ่ายที่โต๊ะ" />
-      <main className="screen content-screen">
-        <ScreenTitle title="เลือกโต๊ะเพื่อรับชำระ" subtitle="ยอดของแต่ละโต๊ะเชื่อมจากออเดอร์ล่าสุด" />
-        <div className="table-grid">
-          {[
-            [1, 0], [2, 420], [3, 0], [4, 195], [5, 350], [6, 0], [7, 195], [8, 275]
-          ].map(([table, total]) => (
-            <button key={table} className={total ? "occupied" : ""} onClick={() => total ? openMethodPicker(total, `โต๊ะ ${table}`) : toast("โต๊ะนี้ยังไม่มีออเดอร์") }>
-              <UtensilsCrossed /><strong>โต๊ะ {table}</strong><small>{total ? `฿${money.format(total)}` : "ว่าง"}</small>
-            </button>
-          ))}
+      <Header title="จัดการโต๊ะ" />
+      <main className="screen content-screen table-manager-screen">
+        <ScreenTitle title="โต๊ะและลิงก์สั่งอาหาร" subtitle="เพิ่มโต๊ะได้ไม่จำกัด แต่ละโต๊ะมีลิงก์สั่งอาหารเฉพาะของตัวเอง" />
+
+        <form className="add-table-panel" onSubmit={createTable}>
+          <span><UtensilsCrossed /></span>
+          <label><strong>เพิ่มโต๊ะใหม่</strong><input value={newTableName} onChange={(event) => setNewTableName(event.target.value)} maxLength={60} placeholder="เช่น โต๊ะ 9, A01 หรือห้อง VIP" autoComplete="off" /></label>
+          <button type="submit" disabled={addingTable}><Plus /> {addingTable ? "กำลังสร้าง..." : "เพิ่มโต๊ะ"}</button>
+        </form>
+
+        <section className="table-link-note"><Sparkles /><span><strong>ลิงก์รู้หมายเลขโต๊ะอัตโนมัติ</strong><small>ลูกค้าเห็นเฉพาะเมนูสั่งอาหาร ไม่เห็นระบบหลังร้าน การเงิน หรือการตั้งค่า</small></span></section>
+
+        <div className="table-list-toolbar">
+          <span><strong>โต๊ะทั้งหมด</strong><small>{tables.length} โต๊ะ</small></span>
+          {tables.length > 6 && <label><Search /><input value={tableSearch} onChange={(event) => setTableSearch(event.target.value)} placeholder="ค้นหาโต๊ะ" /></label>}
         </div>
+
+        {tablesLoading && !tables.length ? <div className="order-loading"><Sparkles /> กำลังโหลดรายการโต๊ะ...</div> : filteredTables.length ? (
+          <div className="table-manager-grid">
+            {filteredTables.map((table) => (
+              <article className={table.orderCount ? "table-manager-card occupied" : "table-manager-card"} key={table.id}>
+                <div className="table-manager-card-head">
+                  <span><UtensilsCrossed /></span>
+                  <div><strong>{table.name}</strong><small>{table.orderCount ? `${table.orderCount} ออเดอร์ใหม่` : "ว่าง · พร้อมรับออเดอร์"}</small></div>
+                  <b>{table.orderCount ? `฿${money.format(table.orderTotal)}` : "พร้อม"}</b>
+                </div>
+                <code>{tableOrderLink(table)}</code>
+                <div className="table-link-actions">
+                  <button type="button" onClick={() => copyTableLink(table)}><Copy /> คัดลอกลิงก์</button>
+                  <button type="button" onClick={() => shareTableLink(table)}><Share2 /> แชร์</button>
+                  <a href={`/order/${table.token}`} target="_blank" rel="noreferrer"><ExternalLink /> เปิดหน้าสั่ง</a>
+                </div>
+                {table.orderCount > 0 && <button type="button" className="table-view-orders" onClick={() => go("orders")}><ClipboardList /> ดูออเดอร์ของโต๊ะนี้ <ChevronRight /></button>}
+              </article>
+            ))}
+          </div>
+        ) : <div className="empty-state"><Search /><strong>ไม่พบโต๊ะที่ค้นหา</strong><p>ลองเปลี่ยนคำค้นหา หรือเพิ่มโต๊ะใหม่ด้านบน</p></div>}
       </main>
     </>
   );
@@ -1441,7 +1677,7 @@ export default function HomePage() {
     <>
       <Header title="เพิ่มสินค้า" onBack={() => go("pos")} />
       <main className="screen content-screen product-manager-screen">
-        <ScreenTitle title="บันทึกรายการอาหาร / สินค้า" subtitle="ข้อมูลที่บันทึกจะแสดงในหน้า POS ของเครื่องนี้ทันที" />
+        <ScreenTitle title="บันทึกรายการอาหาร / สินค้า" subtitle="ข้อมูลที่บันทึกจะแสดงใน POS และลิงก์สั่งอาหารของทุกโต๊ะ" />
 
         <section className="product-manager-intro">
           <span><Sparkles /></span>
