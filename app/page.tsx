@@ -107,6 +107,7 @@ type RestaurantTable = {
   active: boolean;
   orderTotal: number;
   orderCount: number;
+  latestOrderAt: string | null;
   createdAt: string;
 };
 
@@ -599,7 +600,17 @@ export default function HomePage() {
   );
   const filteredTables = useMemo(() => {
     const term = tableSearch.trim().toLocaleLowerCase("th-TH");
-    return term ? tables.filter((table) => table.name.toLocaleLowerCase("th-TH").includes(term)) : tables;
+    const matchedTables = term ? tables.filter((table) => table.name.toLocaleLowerCase("th-TH").includes(term)) : tables;
+    return [...matchedTables].sort((left, right) => {
+      const leftHasOrders = left.orderCount > 0;
+      const rightHasOrders = right.orderCount > 0;
+      if (leftHasOrders !== rightHasOrders) return rightHasOrders ? 1 : -1;
+      if (leftHasOrders && rightHasOrders) {
+        const newestFirst = String(right.latestOrderAt ?? "").localeCompare(String(left.latestOrderAt ?? ""));
+        if (newestFirst !== 0) return newestFirst;
+      }
+      return left.id - right.id;
+    });
   }, [tableSearch, tables]);
   const newTableOrders = useMemo(() => tableOrders.filter((order) => order.status === "new"), [tableOrders]);
   const doneTableOrders = useMemo(() => tableOrders.filter((order) => order.status === "done"), [tableOrders]);
@@ -748,7 +759,7 @@ export default function HomePage() {
     setTablesLoading(true);
     setOrdersLoading(true);
     void refresh();
-    const timer = window.setInterval(() => void refresh(), 6000);
+    const timer = window.setInterval(() => void refresh(), 3000);
     return () => { active = false; window.clearInterval(timer); };
   }, [view]);
 

@@ -18,12 +18,16 @@ export async function GET() {
     const result = await getD1().prepare(`
       SELECT t.id, t.name, t.token, t.active, t.created_at,
         COALESCE(SUM(CASE WHEN o.status = 'new' THEN o.total_cents ELSE 0 END), 0) AS order_total_cents,
-        COALESCE(SUM(CASE WHEN o.status = 'new' THEN 1 ELSE 0 END), 0) AS order_count
+        COALESCE(SUM(CASE WHEN o.status = 'new' THEN 1 ELSE 0 END), 0) AS order_count,
+        MAX(CASE WHEN o.status = 'new' THEN o.created_at ELSE NULL END) AS latest_order_at
       FROM restaurant_tables t
       LEFT JOIN table_orders o ON o.table_id = t.id
       WHERE t.active = 1
       GROUP BY t.id
-      ORDER BY t.id
+      ORDER BY
+        CASE WHEN latest_order_at IS NULL THEN 1 ELSE 0 END ASC,
+        latest_order_at DESC,
+        t.id ASC
     `).all();
 
     return Response.json({ tables: result.results.map((row) => ({
@@ -33,6 +37,7 @@ export async function GET() {
       active: Boolean(row.active),
       orderTotal: Number(row.order_total_cents) / 100,
       orderCount: Number(row.order_count),
+      latestOrderAt: row.latest_order_at ? String(row.latest_order_at) : null,
       createdAt: String(row.created_at),
     })) });
   } catch (error) {
