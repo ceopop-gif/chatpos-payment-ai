@@ -452,7 +452,24 @@ function MethodMark({ method, size = "md" }: { method: PaymentMethod; size?: "sm
   );
 }
 
-function Header({ title, onBack }: { title?: string; onBack?: () => void }) {
+function Header({
+  title,
+  onBack,
+  notificationCount = 0,
+  notificationAlerting = false,
+  notificationSoundReady = false,
+  onNotification,
+  onEnableNotificationSound,
+}: {
+  title?: string;
+  onBack?: () => void;
+  notificationCount?: number;
+  notificationAlerting?: boolean;
+  notificationSoundReady?: boolean;
+  onNotification?: () => void;
+  onEnableNotificationSound?: () => void;
+}) {
+  const visibleNotificationCount = notificationCount > 99 ? "99+" : String(notificationCount);
   return (
     <header className="app-header">
       <div className="header-row">
@@ -467,11 +484,22 @@ function Header({ title, onBack }: { title?: string; onBack?: () => void }) {
           <h1>{title ?? <><span>Chat</span><em>POS</em><sup>AI</sup></>}</h1>
           <p>{title ? "Merchant: ร้านตัวอย่าง" : <><i className="live-dot" /> AI Commerce Operating System</>}</p>
         </div>
-        <button className="icon-button notification" aria-label="การแจ้งเตือน">
+        <button
+          type="button"
+          className={`icon-button notification ${notificationCount ? "has-orders" : ""} ${notificationAlerting ? "ringing" : ""} ${notificationSoundReady ? "is-ready" : ""}`}
+          onClick={onNotification}
+          aria-label={notificationCount ? `มีออเดอร์ใหม่ ${notificationCount} รายการ กดเพื่อดูออเดอร์` : "ดูการแจ้งเตือนออเดอร์"}
+        >
           <Bell />
-          <span>2</span>
+          {notificationCount > 0 && <span>{visibleNotificationCount}</span>}
         </button>
       </div>
+      {!notificationSoundReady && onEnableNotificationSound && (
+        <button type="button" className="notification-unlock" onClick={onEnableNotificationSound}>
+          <Volume2 />
+          <span><b>เปิดเสียงเตือนออเดอร์</b><small>แตะครั้งเดียว เพื่อให้มีเสียงทุกครั้งที่ออเดอร์เข้า</small></span>
+        </button>
+      )}
     </header>
   );
 }
@@ -561,6 +589,8 @@ export default function HomePage() {
   const [voiceStatus, setVoiceStatus] = useState<"idle" | "ready" | "speaking" | "unsupported" | "error">("idle");
   const [lineAudioMode, setLineAudioMode] = useState(false);
   const [lineAudioUnlocked, setLineAudioUnlocked] = useState(false);
+  const [notificationSoundReady, setNotificationSoundReady] = useState(false);
+  const [notificationAlerting, setNotificationAlerting] = useState(false);
   const [qrSavePreview, setQrSavePreview] = useState<string | null>(null);
   const speechRunRef = useRef(0);
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
@@ -579,6 +609,9 @@ export default function HomePage() {
   const categoryStorageErrorRef = useRef(false);
   const menuSyncReadyRef = useRef(false);
   const menuSyncTimerRef = useRef<number | null>(null);
+  const knownOrderIdsRef = useRef<Set<string> | null>(null);
+  const pendingOrderSoundRef = useRef(false);
+  const notificationVisualTimerRef = useRef<number | null>(null);
 
   const amount = Number(amountText || 0);
   const cartTotal = useMemo(() => cart.reduce((sum, item) => sum + item.price * item.qty, 0), [cart]);
@@ -618,6 +651,98 @@ export default function HomePage() {
   }, [tableSearch, tables]);
   const activeTableOrders = useMemo(() => tableOrders.filter((order) => order.status !== "done"), [tableOrders]);
   const doneTableOrders = useMemo(() => tableOrders.filter((order) => order.status === "done"), [tableOrders]);
+  const pendingNewOrderCount = useMemo(() => tableOrders.filter((order) => order.status === "new").length, [tableOrders]);
+
+  const ensureNotificationAudio = async () => {
+    if (typeof window === "undefined") return null;
+    const AudioContextClass = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!AudioContextClass) return null;
+    try {
+      const context = audioContextRef.current ?? new AudioContextClass();
+      audioContextRef.current = context;
+      if (context.state === "suspended") await context.resume();
+      if (context.state !== "running") return null;
+      setNotificationSoundReady(true);
+      return context;
+    } catch {
+      return null;
+    }
+  };
+
+  const playOrderAlertTone = async (repeat = 1) => {
+    const context = await ensureNotificationAudio();
+    if (!context) {
+      pendingOrderSoundRef.current = true;
+      return false;
+    }
+
+    const repetitions = Math.min(3, Math.max(1, repeat));
+    const notes = [784, 988, 1318];
+    const startAt = context.currentTime + 0.03;
+    for (let round = 0; round < repetitions; round += 1) {
+      notes.forEach((frequency, noteIndex) => {
+        const noteStart = startAt + round * 0.72 + noteIndex * 0.16;
+        const oscillator = context.createOscillator();
+        const gain = context.createGain();
+        oscillator.type = noteIndex === 2 ? "triangle" : "sine";
+        oscillator.frequency.setValueAtTime(frequency, noteStart);
+        gain.gain.setValueAtTime(0.0001, noteStart);
+        gain.gain.exponentialRampToValueAtTime(0.18, noteStart + 0.025);
+        gain.gain.exponentialRampToValueAtTime(0.0001, noteStart + 0.22);
+        oscillator.connect(gain);
+        gain.connect(context.destination);
+        oscillator.start(noteStart);
+        oscillator.stop(noteStart + 0.24);
+      });
+    }
+    pendingOrderSoundRef.current = false;
+    return true;
+  };
+
+  const enableNotificationSound = async (showConfirmation = true) => {
+    const context = await ensureNotificationAudio();
+    if (!context) {
+      toast.error("LINE ยังปิดเสียงอยู่ กรุณาเพิ่มเสียงสื่อแล้วแตะอีกครั้ง");
+      return;
+    }
+
+    const oscillator = context.createOscillator();
+    const gain = context.createGain();
+    gain.gain.setValueAtTime(0.0001, context.currentTime);
+    oscillator.connect(gain);
+    gain.connect(context.destination);
+    oscillator.start();
+    oscillator.stop(context.currentTime + 0.03);
+
+    if (pendingOrderSoundRef.current) {
+      await playOrderAlertTone();
+    } else if (showConfirmation) {
+      toast.success("เปิดเสียงเตือนออเดอร์แล้ว");
+    }
+  };
+
+  const alertIncomingOrders = (incomingOrders: TableOrder[]) => {
+    if (!incomingOrders.length) return;
+    setNotificationAlerting(true);
+    if (notificationVisualTimerRef.current !== null) window.clearTimeout(notificationVisualTimerRef.current);
+    notificationVisualTimerRef.current = window.setTimeout(() => setNotificationAlerting(false), 5200);
+
+    if ("vibrate" in navigator) navigator.vibrate([240, 100, 240, 100, 420]);
+    void playOrderAlertTone(incomingOrders.length);
+
+    if (incomingOrders.length === 1) {
+      const order = incomingOrders[0];
+      toast(`🔔 ออเดอร์ใหม่ · ${order.tableName}`, {
+        description: `${order.items.map((item) => `${item.name} × ${item.quantity}`).join(", ")} · ฿${money.format(order.total)}`,
+        duration: 12000,
+      });
+    } else {
+      toast(`🔔 มีออเดอร์ใหม่ ${incomingOrders.length} รายการ`, {
+        description: incomingOrders.map((order) => order.tableName).join(" · "),
+        duration: 12000,
+      });
+    }
+  };
 
   useEffect(() => {
     const initialState = window.history.state && typeof window.history.state === "object" ? window.history.state : {};
@@ -757,32 +882,72 @@ export default function HomePage() {
   }, [catalog, catalogReady, categories, categoriesReady]);
 
   useEffect(() => {
+    let active = true;
+    let refreshing = false;
+    const refreshOrders = async () => {
+      if (refreshing) return;
+      refreshing = true;
+      try {
+        const orderResponse = await fetch("/api/orders", { cache: "no-store" });
+        const orderPayload = await orderResponse.json() as { orders?: TableOrder[] };
+        if (!active || !orderResponse.ok || !orderPayload.orders) return;
+
+        const nextOrders = orderPayload.orders;
+        const knownOrderIds = knownOrderIdsRef.current;
+        const incomingOrders = knownOrderIds === null
+          ? nextOrders.filter((order) => order.status === "new")
+          : nextOrders.filter((order) => order.status === "new" && !knownOrderIds.has(order.id));
+        knownOrderIdsRef.current = new Set(nextOrders.map((order) => order.id));
+        setTableOrders(nextOrders);
+        alertIncomingOrders(incomingOrders);
+      } finally {
+        refreshing = false;
+        if (active) setOrdersLoading(false);
+      }
+    };
+    setOrdersLoading(true);
+    void refreshOrders();
+    const timer = window.setInterval(() => void refreshOrders(), 3000);
+    const refreshWhenVisible = () => { if (document.visibilityState === "visible") void refreshOrders(); };
+    window.addEventListener("focus", refreshWhenVisible);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+      window.removeEventListener("focus", refreshWhenVisible);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+    };
+  }, []);
+
+  useEffect(() => {
     if (view !== "tables" && view !== "orders") return;
     let active = true;
-    const refresh = async () => {
+    const refreshTables = async () => {
       try {
-        const [tableResponse, orderResponse] = await Promise.all([
-          fetch("/api/tables", { cache: "no-store" }),
-          fetch("/api/orders", { cache: "no-store" }),
-        ]);
+        const tableResponse = await fetch("/api/tables", { cache: "no-store" });
         const tablePayload = await tableResponse.json() as { tables?: RestaurantTable[] };
-        const orderPayload = await orderResponse.json() as { orders?: TableOrder[] };
-        if (!active) return;
-        if (tableResponse.ok && tablePayload.tables) setTables(tablePayload.tables);
-        if (orderResponse.ok && orderPayload.orders) setTableOrders(orderPayload.orders);
+        if (active && tableResponse.ok && tablePayload.tables) setTables(tablePayload.tables);
       } finally {
-        if (active) {
-          setTablesLoading(false);
-          setOrdersLoading(false);
-        }
+        if (active) setTablesLoading(false);
       }
     };
     setTablesLoading(true);
-    setOrdersLoading(true);
-    void refresh();
-    const timer = window.setInterval(() => void refresh(), 3000);
+    void refreshTables();
+    const timer = window.setInterval(() => void refreshTables(), 3000);
     return () => { active = false; window.clearInterval(timer); };
   }, [view]);
+
+  useEffect(() => {
+    const unlockOnFirstTouch = () => { void enableNotificationSound(false); };
+    window.addEventListener("pointerdown", unlockOnFirstTouch, { capture: true, once: true });
+    return () => window.removeEventListener("pointerdown", unlockOnFirstTouch, true);
+  }, []);
+
+  useEffect(() => {
+    document.title = pendingNewOrderCount > 0
+      ? `(${pendingNewOrderCount}) ออเดอร์ใหม่ | ChatPOS`
+      : "ChatPOS Merchant Payment System";
+  }, [pendingNewOrderCount]);
 
   useEffect(() => {
     const inLine = isLineEnvironment();
@@ -831,6 +996,7 @@ export default function HomePage() {
   useEffect(() => () => {
     if (qrPreviewUrlRef.current) URL.revokeObjectURL(qrPreviewUrlRef.current);
     if (tableQrPreviewUrlRef.current) URL.revokeObjectURL(tableQrPreviewUrlRef.current);
+    if (notificationVisualTimerRef.current !== null) window.clearTimeout(notificationVisualTimerRef.current);
   }, []);
 
   const cancelSpeech = () => {
@@ -1274,6 +1440,12 @@ export default function HomePage() {
     }
   };
 
+  const openOrderNotifications = () => {
+    setNotificationAlerting(false);
+    void ensureNotificationAudio();
+    go("orders");
+  };
+
   const resetAmount = (value = "0") => {
     setAmountText(value);
     setExpression("");
@@ -1602,9 +1774,21 @@ export default function HomePage() {
     setWithdrawText("");
   };
 
+  const AppHeader = ({ title, onBack }: { title?: string; onBack?: () => void }) => (
+    <Header
+      title={title}
+      onBack={onBack}
+      notificationCount={pendingNewOrderCount}
+      notificationAlerting={notificationAlerting}
+      notificationSoundReady={notificationSoundReady}
+      onNotification={openOrderNotifications}
+      onEnableNotificationSound={() => { void enableNotificationSound(); }}
+    />
+  );
+
   const HomeScreen = () => (
     <>
-      <Header />
+      <AppHeader />
       <main className="screen home-screen">
         <button className="balance-strip" onClick={() => go("transactions")}>
           <span><b>ยอดรับวันนี้</b><strong>฿{money.format(todayTotal)}</strong></span>
@@ -1670,7 +1854,7 @@ export default function HomePage() {
     const ActionIcon = current.icon;
     return (
       <>
-        <Header title={current.name} onBack={goBack} />
+        <AppHeader title={current.name} onBack={goBack} />
         <main className="screen payment-screen">
           <div className="ai-context-bar">
             <Sparkles />
@@ -1733,7 +1917,7 @@ export default function HomePage() {
       : ["promptpay", "visa", "truemoney", "wechat", "alipay", "mobile"];
     return (
       <>
-        <Header title={otherOnly ? "ช่องทางอื่นๆ" : "เลือกช่องทางชำระ"} onBack={goBack} />
+        <AppHeader title={otherOnly ? "ช่องทางอื่นๆ" : "เลือกช่องทางชำระ"} onBack={goBack} />
         <main className="screen content-screen">
           <ScreenTitle title={otherOnly ? "รับชำระช่องทางอื่น" : "ลูกค้าต้องการจ่ายแบบไหน"} subtitle={amount > 0 ? `ยอดที่ต้องชำระ ฿${money.format(amount)}` : "เลือกช่องทางแล้วระบุยอดชำระ"} />
           <div className="method-list">
@@ -1757,7 +1941,7 @@ export default function HomePage() {
 
   const TransactionsScreen = () => (
     <>
-      <Header title="รายการล่าสุด" onBack={goBack} />
+      <AppHeader title="รายการล่าสุด" onBack={goBack} />
       <main className="screen content-screen">
         <section className="summary-panel">
           <div><small>ยอดรับวันนี้</small><strong>฿{money.format(todayTotal)}</strong></div>
@@ -1780,7 +1964,7 @@ export default function HomePage() {
 
   const WithdrawScreen = () => (
     <>
-      <Header title="ถอนเงิน" onBack={goBack} />
+      <AppHeader title="ถอนเงิน" onBack={goBack} />
       <main className="screen content-screen">
         <section className="withdraw-balance">
           <span><WalletCards /></span>
@@ -1812,7 +1996,7 @@ export default function HomePage() {
 
   const OrdersScreen = () => (
     <>
-      <Header title="ออเดอร์" onBack={goBack} />
+      <AppHeader title="ออเดอร์" onBack={goBack} />
       <main className="screen content-screen">
         <ScreenTitle title="ออเดอร์จากโต๊ะ" subtitle="อัปเดตอัตโนมัติทุก 3 วินาที พร้อมระบุโต๊ะจากลิงก์ที่ลูกค้าเปิด" />
         <Tabs defaultValue="new" className="orders-tabs">
@@ -1857,7 +2041,7 @@ export default function HomePage() {
 
   const TablesScreen = () => (
     <>
-      <Header title="จัดการโต๊ะ" onBack={goBack} />
+      <AppHeader title="จัดการโต๊ะ" onBack={goBack} />
       <main className="screen content-screen table-manager-screen">
         <ScreenTitle title="โต๊ะ ลิงก์ และ QR สั่งอาหาร" subtitle="เพิ่มโต๊ะได้ไม่จำกัด แล้วดาวน์โหลดรูป QR เฉพาะของแต่ละโต๊ะได้ทันที" />
 
@@ -1901,7 +2085,7 @@ export default function HomePage() {
 
   const PosScreen = () => (
     <>
-      <Header title="POS" onBack={goBack} />
+      <AppHeader title="POS" onBack={goBack} />
       <main className="screen content-screen pos-screen">
         <ScreenTitle title="ขายหน้าร้าน" subtitle="แตะสินค้าเพื่อเพิ่มลงตะกร้า" />
         <button className="product-manager-entry" onClick={() => go("product-manager")}>
@@ -1996,7 +2180,7 @@ export default function HomePage() {
 
   const ProductManagerScreen = () => (
     <>
-      <Header title="เพิ่มสินค้า" onBack={goBack} />
+      <AppHeader title="เพิ่มสินค้า" onBack={goBack} />
       <main className="screen content-screen product-manager-screen">
         <ScreenTitle title="บันทึกรายการอาหาร / สินค้า" subtitle="ข้อมูลที่บันทึกจะแสดงใน POS และลิงก์สั่งอาหารของทุกโต๊ะ" />
 
@@ -2092,7 +2276,7 @@ export default function HomePage() {
 
   const SettingsScreen = () => (
     <>
-      <Header title="ตั้งค่า" onBack={goBack} />
+      <AppHeader title="ตั้งค่า" onBack={goBack} />
       <main className="screen content-screen">
         <section className="merchant-card"><span><Store /></span><div><strong>ร้านตัวอย่าง</strong><small>Merchant ID: CP0001234</small></div><CheckCircle2 /></section>
         <ScreenTitle title="ตั้งค่าร้านค้า" subtitle="ข้อมูลทุกส่วนใช้ร่วมกันทั้งระบบ" />
