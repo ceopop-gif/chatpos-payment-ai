@@ -78,6 +78,8 @@ type View =
   | "product-manager"
   | "settings";
 
+const appViews: View[] = ["home", "payment", "method-picker", "other-methods", "withdraw", "transactions", "orders", "tables", "pos", "product-manager", "settings"];
+
 type PaymentMethod = "promptpay" | "visa" | "truemoney" | "wechat" | "alipay" | "mobile" | "shopeepay";
 
 type Transaction = {
@@ -565,6 +567,7 @@ export default function HomePage() {
   const spokenAudioRef = useRef<HTMLAudioElement | null>(null);
   const voiceFailureNotifiedRef = useRef(false);
   const qrImageRef = useRef<HTMLDivElement | null>(null);
+  const navigationIndexRef = useRef(0);
   const qrPngBlobRef = useRef<Blob | null>(null);
   const qrPreviewUrlRef = useRef<string | null>(null);
   const tableQrImageRef = useRef<HTMLDivElement | null>(null);
@@ -614,6 +617,23 @@ export default function HomePage() {
   }, [tableSearch, tables]);
   const newTableOrders = useMemo(() => tableOrders.filter((order) => order.status === "new"), [tableOrders]);
   const doneTableOrders = useMemo(() => tableOrders.filter((order) => order.status === "done"), [tableOrders]);
+
+  useEffect(() => {
+    const initialState = window.history.state && typeof window.history.state === "object" ? window.history.state : {};
+    window.history.replaceState({ ...initialState, chatposView: "home", chatposIndex: 0 }, "");
+
+    const handleBrowserBack = (event: PopStateEvent) => {
+      const nextView = event.state?.chatposView;
+      if (!appViews.includes(nextView as View)) return;
+      navigationIndexRef.current = Number.isInteger(event.state?.chatposIndex) ? Math.max(0, Number(event.state.chatposIndex)) : 0;
+      setDialogOpen(false);
+      setView(nextView as View);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    };
+
+    window.addEventListener("popstate", handleBrowserBack);
+    return () => window.removeEventListener("popstate", handleBrowserBack);
+  }, []);
 
   useEffect(() => {
     try {
@@ -1205,10 +1225,28 @@ export default function HomePage() {
   };
 
   const go = (next: View) => {
+    if (next === view) return;
     cancelSpeech();
     setDialogOpen(false);
+    const nextIndex = navigationIndexRef.current + 1;
+    navigationIndexRef.current = nextIndex;
+    const currentState = window.history.state && typeof window.history.state === "object" ? window.history.state : {};
+    window.history.pushState({ ...currentState, chatposView: next, chatposIndex: nextIndex }, "");
     setView(next);
     window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const goBack = () => {
+    cancelSpeech();
+    setDialogOpen(false);
+    if (navigationIndexRef.current > 0) {
+      window.history.back();
+      return;
+    }
+    if (view !== "home") {
+      setView("home");
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
   };
 
   const resetAmount = (value = "0") => {
@@ -1607,7 +1645,7 @@ export default function HomePage() {
     const ActionIcon = current.icon;
     return (
       <>
-        <Header title={current.name} onBack={() => go("home")} />
+        <Header title={current.name} onBack={goBack} />
         <main className="screen payment-screen">
           <div className="ai-context-bar">
             <Sparkles />
@@ -1670,7 +1708,7 @@ export default function HomePage() {
       : ["promptpay", "visa", "truemoney", "wechat", "alipay", "mobile"];
     return (
       <>
-        <Header title={otherOnly ? "ช่องทางอื่นๆ" : "เลือกช่องทางชำระ"} onBack={() => go("home")} />
+        <Header title={otherOnly ? "ช่องทางอื่นๆ" : "เลือกช่องทางชำระ"} onBack={goBack} />
         <main className="screen content-screen">
           <ScreenTitle title={otherOnly ? "รับชำระช่องทางอื่น" : "ลูกค้าต้องการจ่ายแบบไหน"} subtitle={amount > 0 ? `ยอดที่ต้องชำระ ฿${money.format(amount)}` : "เลือกช่องทางแล้วระบุยอดชำระ"} />
           <div className="method-list">
@@ -1694,7 +1732,7 @@ export default function HomePage() {
 
   const TransactionsScreen = () => (
     <>
-      <Header title="รายการล่าสุด" onBack={() => go("home")} />
+      <Header title="รายการล่าสุด" onBack={goBack} />
       <main className="screen content-screen">
         <section className="summary-panel">
           <div><small>ยอดรับวันนี้</small><strong>฿{money.format(todayTotal)}</strong></div>
@@ -1717,7 +1755,7 @@ export default function HomePage() {
 
   const WithdrawScreen = () => (
     <>
-      <Header title="ถอนเงิน" onBack={() => go("home")} />
+      <Header title="ถอนเงิน" onBack={goBack} />
       <main className="screen content-screen">
         <section className="withdraw-balance">
           <span><WalletCards /></span>
@@ -1749,9 +1787,9 @@ export default function HomePage() {
 
   const OrdersScreen = () => (
     <>
-      <Header title="ออเดอร์" />
+      <Header title="ออเดอร์" onBack={goBack} />
       <main className="screen content-screen">
-        <ScreenTitle title="ออเดอร์จากโต๊ะ" subtitle="อัปเดตอัตโนมัติทุก 6 วินาที พร้อมระบุโต๊ะจากลิงก์ที่ลูกค้าเปิด" />
+        <ScreenTitle title="ออเดอร์จากโต๊ะ" subtitle="อัปเดตอัตโนมัติทุก 3 วินาที พร้อมระบุโต๊ะจากลิงก์ที่ลูกค้าเปิด" />
         <Tabs defaultValue="new" className="orders-tabs">
           <TabsList><TabsTrigger value="new">ออเดอร์ใหม่ {newTableOrders.length}</TabsTrigger><TabsTrigger value="done">เสร็จแล้ว {doneTableOrders.length}</TabsTrigger></TabsList>
           <TabsContent value="new" className="order-stack">
@@ -1786,7 +1824,7 @@ export default function HomePage() {
 
   const TablesScreen = () => (
     <>
-      <Header title="จัดการโต๊ะ" />
+      <Header title="จัดการโต๊ะ" onBack={goBack} />
       <main className="screen content-screen table-manager-screen">
         <ScreenTitle title="โต๊ะ ลิงก์ และ QR สั่งอาหาร" subtitle="เพิ่มโต๊ะได้ไม่จำกัด แล้วดาวน์โหลดรูป QR เฉพาะของแต่ละโต๊ะได้ทันที" />
 
@@ -1830,7 +1868,7 @@ export default function HomePage() {
 
   const PosScreen = () => (
     <>
-      <Header title="POS" />
+      <Header title="POS" onBack={goBack} />
       <main className="screen content-screen pos-screen">
         <ScreenTitle title="ขายหน้าร้าน" subtitle="แตะสินค้าเพื่อเพิ่มลงตะกร้า" />
         <button className="product-manager-entry" onClick={() => go("product-manager")}>
@@ -1925,7 +1963,7 @@ export default function HomePage() {
 
   const ProductManagerScreen = () => (
     <>
-      <Header title="เพิ่มสินค้า" onBack={() => go("pos")} />
+      <Header title="เพิ่มสินค้า" onBack={goBack} />
       <main className="screen content-screen product-manager-screen">
         <ScreenTitle title="บันทึกรายการอาหาร / สินค้า" subtitle="ข้อมูลที่บันทึกจะแสดงใน POS และลิงก์สั่งอาหารของทุกโต๊ะ" />
 
@@ -2021,7 +2059,7 @@ export default function HomePage() {
 
   const SettingsScreen = () => (
     <>
-      <Header title="ตั้งค่า" />
+      <Header title="ตั้งค่า" onBack={goBack} />
       <main className="screen content-screen">
         <section className="merchant-card"><span><Store /></span><div><strong>ร้านตัวอย่าง</strong><small>Merchant ID: CP0001234</small></div><CheckCircle2 /></section>
         <ScreenTitle title="ตั้งค่าร้านค้า" subtitle="ข้อมูลทุกส่วนใช้ร่วมกันทั้งระบบ" />
