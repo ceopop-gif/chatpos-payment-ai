@@ -115,8 +115,9 @@ const seededProducts: Product[] = [
   { id: 6, name: "น้ำเปล่า", price: 20, category: "เครื่องดื่ม", description: "", image: null, active: true },
 ];
 
-const productCategories = ["อาหารจานเดียว", "กับข้าว", "ของทานเล่น", "เครื่องดื่ม", "ของหวาน", "สินค้าอื่นๆ"];
+const defaultProductCategories = ["อาหารจานเดียว", "กับข้าว", "ของทานเล่น", "เครื่องดื่ม", "ของหวาน", "สินค้าอื่นๆ"];
 const PRODUCT_STORAGE_KEY = "chatpos-product-catalog-v1";
+const CATEGORY_STORAGE_KEY = "chatpos-product-categories-v1";
 
 const seededTransactions: Transaction[] = [
   { id: "CP-240816-017", method: "QR PromptPay", amount: 320, time: "10:45 น.", status: "สำเร็จ" },
@@ -390,10 +391,15 @@ export default function HomePage() {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [catalog, setCatalog] = useState<Product[]>(seededProducts);
   const [catalogReady, setCatalogReady] = useState(false);
+  const [categories, setCategories] = useState<string[]>(defaultProductCategories);
+  const [categoriesReady, setCategoriesReady] = useState(false);
+  const [posCategory, setPosCategory] = useState("ทั้งหมด");
+  const [categoryDialogOpen, setCategoryDialogOpen] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState("");
   const [editingProductId, setEditingProductId] = useState<number | null>(null);
   const [productName, setProductName] = useState("");
   const [productPrice, setProductPrice] = useState("");
-  const [productCategory, setProductCategory] = useState(productCategories[0]);
+  const [productCategory, setProductCategory] = useState(defaultProductCategories[0]);
   const [productDescription, setProductDescription] = useState("");
   const [productImage, setProductImage] = useState<string | null>(null);
   const [productActive, setProductActive] = useState(true);
@@ -416,11 +422,24 @@ export default function HomePage() {
   const qrPreviewUrlRef = useRef<string | null>(null);
   const productFormRef = useRef<HTMLFormElement | null>(null);
   const productStorageErrorRef = useRef(false);
+  const categoryStorageErrorRef = useRef(false);
 
   const amount = Number(amountText || 0);
   const cartTotal = useMemo(() => cart.reduce((sum, item) => sum + item.price * item.qty, 0), [cart]);
   const todayTotal = useMemo(() => transactions.filter((item) => item.amount > 0).reduce((sum, item) => sum + item.amount, 0), [transactions]);
   const activeProducts = useMemo(() => catalog.filter((product) => product.active), [catalog]);
+  const availableCategories = useMemo(() => {
+    const allNames = [...categories, ...catalog.map((product) => product.category)];
+    return allNames.reduce<string[]>((result, category) => {
+      const name = category.trim();
+      if (name && !result.some((item) => item.localeCompare(name, "th", { sensitivity: "base" }) === 0)) result.push(name);
+      return result;
+    }, []);
+  }, [categories, catalog]);
+  const visibleProducts = useMemo(
+    () => posCategory === "ทั้งหมด" ? activeProducts : activeProducts.filter((product) => product.category === posCategory),
+    [activeProducts, posCategory],
+  );
 
   useEffect(() => {
     try {
@@ -464,6 +483,39 @@ export default function HomePage() {
       }
     }
   }, [catalog, catalogReady]);
+
+  useEffect(() => {
+    try {
+      const storedCategories = window.localStorage.getItem(CATEGORY_STORAGE_KEY);
+      if (storedCategories) {
+        const parsed = JSON.parse(storedCategories) as unknown;
+        if (Array.isArray(parsed)) {
+          const restored = parsed.filter((item): item is string => typeof item === "string" && Boolean(item.trim())).map((item) => item.trim());
+          setCategories([...defaultProductCategories, ...restored].reduce<string[]>((result, category) => {
+            if (!result.some((item) => item.localeCompare(category, "th", { sensitivity: "base" }) === 0)) result.push(category);
+            return result;
+          }, []));
+        }
+      }
+    } catch {
+      // Keep the starter categories when browser storage is unavailable or invalid.
+    } finally {
+      setCategoriesReady(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!categoriesReady) return;
+    try {
+      window.localStorage.setItem(CATEGORY_STORAGE_KEY, JSON.stringify(categories));
+      categoryStorageErrorRef.current = false;
+    } catch {
+      if (!categoryStorageErrorRef.current) {
+        toast.error("บันทึกหมวดหมู่ในเครื่องไม่สำเร็จ กรุณาลองอีกครั้ง");
+        categoryStorageErrorRef.current = true;
+      }
+    }
+  }, [categories, categoriesReady]);
 
   useEffect(() => {
     const inLine = isLineEnvironment();
@@ -892,14 +944,38 @@ export default function HomePage() {
     toast.success(`เพิ่ม ${product.name} แล้ว`);
   };
 
-  const resetProductForm = () => {
+  const resetProductForm = (nextCategory = availableCategories[0] ?? defaultProductCategories[0]) => {
     setEditingProductId(null);
     setProductName("");
     setProductPrice("");
-    setProductCategory(productCategories[0]);
+    setProductCategory(nextCategory);
     setProductDescription("");
     setProductImage(null);
     setProductActive(true);
+  };
+
+  const openCategoryDialog = () => {
+    setNewCategoryName("");
+    setCategoryDialogOpen(true);
+  };
+
+  const submitCategory = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const categoryName = newCategoryName.trim().replace(/\s+/g, " ");
+    if (!categoryName) return toast.error("กรุณากรอกชื่อหมวดหมู่");
+    const existingCategory = availableCategories.find((category) => category.localeCompare(categoryName, "th", { sensitivity: "base" }) === 0);
+    if (existingCategory) {
+      setProductCategory(existingCategory);
+      setCategoryDialogOpen(false);
+      setNewCategoryName("");
+      toast.info(`เลือกหมวด ${existingCategory} ให้แล้ว`);
+      return;
+    }
+    setCategories((current) => [...current, categoryName]);
+    setProductCategory(categoryName);
+    setCategoryDialogOpen(false);
+    setNewCategoryName("");
+    toast.success(`เพิ่มหมวด ${categoryName} แล้ว`);
   };
 
   const handleProductImage = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -957,7 +1033,7 @@ export default function HomePage() {
       }, ...current]);
       toast.success(`บันทึก ${name} เรียบร้อยแล้ว`);
     }
-    resetProductForm();
+    resetProductForm(productCategory);
   };
 
   const editProduct = (product: Product) => {
@@ -1267,9 +1343,20 @@ export default function HomePage() {
           <div><strong>บันทึกรายการอาหาร / สินค้า</strong><small>เพิ่มรูป หมวดหมู่ ชื่อ และราคา</small></div>
           <ChevronRight />
         </button>
-        {activeProducts.length > 0 ? (
+
+        <section className="pos-category-filter" aria-label="เลือกหมวดหมู่สินค้า">
+          <div className="pos-category-heading"><span><Grid2X2 /> เลือกหมวดหมู่</span><small>{visibleProducts.length} สินค้า</small></div>
+          <div className="pos-category-scroll">
+            {["ทั้งหมด", ...availableCategories].map((category) => {
+              const count = category === "ทั้งหมด" ? activeProducts.length : activeProducts.filter((product) => product.category === category).length;
+              return <button type="button" key={category} className={posCategory === category ? "active" : ""} onClick={() => setPosCategory(category)}><span>{category}</span><small>{count}</small></button>;
+            })}
+          </div>
+        </section>
+
+        {visibleProducts.length > 0 ? (
           <div className="product-grid">
-            {activeProducts.map((product) => (
+            {visibleProducts.map((product) => (
               <button className="product-card" key={product.id} onClick={() => addProduct(product)} aria-label={`เพิ่ม ${product.name} ลงตะกร้า`}>
                 <div className="product-card-media">
                   {product.image ? <img src={product.image} alt="" /> : <span className="product-card-placeholder"><PackagePlus /></span>}
@@ -1282,7 +1369,7 @@ export default function HomePage() {
             ))}
           </div>
         ) : (
-          <div className="product-empty-state"><PackagePlus /><strong>ยังไม่มีสินค้าที่เปิดขาย</strong><p>แตะปุ่มด้านบนเพื่อเพิ่มรายการแรก</p></div>
+          <div className="product-empty-state"><PackagePlus /><strong>{posCategory === "ทั้งหมด" ? "ยังไม่มีสินค้าที่เปิดขาย" : `ยังไม่มีสินค้าในหมวด ${posCategory}`}</strong><p>เพิ่มสินค้าใหม่แล้วเลือกหมวดนี้ได้ทันที</p><button type="button" onClick={() => go("product-manager")}><Plus /> เพิ่มสินค้า</button></div>
         )}
         <section className="cart-panel">
           <div className="cart-title"><h3><ShoppingBasket /> ตะกร้าสินค้า</h3><span>{cart.reduce((sum, item) => sum + item.qty, 0)} รายการ</span></div>
@@ -1333,17 +1420,20 @@ export default function HomePage() {
               <input value={productName} onChange={(event) => setProductName(event.target.value)} placeholder="เช่น กะเพราไก่ไข่ดาว" maxLength={80} autoComplete="off" />
             </label>
 
-            <div className="product-field">
+            <div className="product-field product-field-full">
               <span>หมวดหมู่ *</span>
-              <Select value={productCategory} onValueChange={setProductCategory}>
-                <SelectTrigger className="product-category-select" aria-label="เลือกหมวดหมู่สินค้า"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {productCategories.map((category) => <SelectItem key={category} value={category}>{category}</SelectItem>)}
-                </SelectContent>
-              </Select>
+              <div className="product-category-control">
+                <Select value={productCategory} onValueChange={setProductCategory}>
+                  <SelectTrigger className="product-category-select" aria-label="เลือกหมวดหมู่สินค้า"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {availableCategories.map((category) => <SelectItem key={category} value={category}>{category}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+                <button type="button" className="add-category-button" onClick={openCategoryDialog}><Plus /> เพิ่มหมวด</button>
+              </div>
             </div>
 
-            <label className="product-field">
+            <label className="product-field product-field-full">
               <span>ราคาขาย (บาท) *</span>
               <div className="product-price-input"><b>฿</b><input value={productPrice} onChange={(event) => setProductPrice(event.target.value)} placeholder="0.00" inputMode="decimal" min="0" step="0.01" type="number" /></div>
             </label>
@@ -1360,7 +1450,7 @@ export default function HomePage() {
           </div>
 
           <div className="product-form-actions">
-            {editingProductId !== null && <button type="button" className="product-cancel-button" onClick={resetProductForm}>ยกเลิกแก้ไข</button>}
+            {editingProductId !== null && <button type="button" className="product-cancel-button" onClick={() => resetProductForm()}>ยกเลิกแก้ไข</button>}
             <button type="submit" className="product-save-button"><Save /> {editingProductId === null ? "บันทึกสินค้า" : "บันทึกการแก้ไข"}</button>
           </div>
         </form>
@@ -1539,6 +1629,26 @@ export default function HomePage() {
               <button className="primary-button" onClick={() => { setDialogOpen(false); go("transactions"); }}><ReceiptText /> ตรวจสอบสถานะ</button>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={categoryDialogOpen} onOpenChange={setCategoryDialogOpen}>
+        <DialogContent className="category-dialog">
+          <DialogHeader>
+            <div className="category-dialog-icon"><Plus /></div>
+            <DialogTitle>เพิ่มหมวดหมู่ใหม่</DialogTitle>
+            <DialogDescription>ตั้งชื่อสั้นๆ ให้พนักงานมองเห็นและเลือกได้ง่าย เช่น อาหารเช้า หรือ เมนูแนะนำ</DialogDescription>
+          </DialogHeader>
+          <form onSubmit={submitCategory}>
+            <label>
+              <span>ชื่อหมวดหมู่</span>
+              <input value={newCategoryName} onChange={(event) => setNewCategoryName(event.target.value)} placeholder="เช่น อาหารเช้า" maxLength={40} autoFocus autoComplete="off" />
+            </label>
+            <div className="category-dialog-actions">
+              <button type="button" onClick={() => setCategoryDialogOpen(false)}>ยกเลิก</button>
+              <button type="submit"><Plus /> เพิ่มหมวดหมู่</button>
+            </div>
+          </form>
         </DialogContent>
       </Dialog>
       <Toaster position="top-center" richColors />
