@@ -64,6 +64,13 @@
       "when": 1788247166905,
       "tag": "0008_lovely_betty_ross",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1788249328788,
+      "tag": "0009_giant_quasar",
+      "breakpoints": true
     }
   ]
 }

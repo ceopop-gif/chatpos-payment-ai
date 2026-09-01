@@ -77,9 +77,10 @@ type View =
   | "tables"
   | "pos"
   | "product-manager"
+  | "membership"
   | "settings";
 
-const appViews: View[] = ["home", "payment", "method-picker", "other-methods", "withdraw", "transactions", "orders", "tables", "pos", "product-manager", "settings"];
+const appViews: View[] = ["home", "payment", "method-picker", "other-methods", "withdraw", "transactions", "orders", "tables", "pos", "product-manager", "membership", "settings"];
 
 type PaymentMethod = "promptpay" | "visa" | "truemoney" | "wechat" | "alipay" | "mobile" | "shopeepay";
 
@@ -89,6 +90,23 @@ type Transaction = {
   amount: number;
   time: string;
   status: "สำเร็จ" | "กำลังตรวจสอบ";
+};
+
+type MembershipReport = {
+  membership: {
+    isSubscriber: boolean;
+    plan: "standard" | "subscriber";
+    status: "standard" | "active" | "past_due" | "cancelled";
+    activationFee: number;
+    dailyFee: number;
+    outstanding: number;
+    balance: number;
+    promptpay: { quota: number; used: number; remaining: number; usagePercent: number; cycleStart: string | null; cycleEnd: string | null; daysRemaining: number };
+    rates: { promptpay: string; promptpayOverQuota: string; visa: string; wallet: string };
+    startedAt: string | null;
+  };
+  charges: Array<{ id: string; type: string; amount: number; dueDate: string; status: string; description: string; paymentSource: string; attemptCount: number; paidAt: string | null; createdAt: string }>;
+  transactions: Array<{ id: string; method: string; amount: number; feeRate: number; fee: number; netAmount: number; plan: string; freeQuotaApplied: number; quotaCycleStart: string | null; createdAt: string }>;
 };
 
 type Product = {
@@ -157,6 +175,7 @@ const seededTransactions: Transaction[] = [
 ];
 
 const money = new Intl.NumberFormat("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const memberDate = new Intl.DateTimeFormat("th-TH", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Bangkok" });
 
 function compressProductImage(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -592,6 +611,9 @@ export default function HomePage() {
   const [lineAudioUnlocked, setLineAudioUnlocked] = useState(false);
   const [notificationSoundReady, setNotificationSoundReady] = useState(false);
   const [notificationAlerting, setNotificationAlerting] = useState(false);
+  const [membershipReport, setMembershipReport] = useState<MembershipReport | null>(null);
+  const [membershipLoading, setMembershipLoading] = useState(false);
+  const [subscribing, setSubscribing] = useState(false);
   const [qrSavePreview, setQrSavePreview] = useState<string | null>(null);
   const speechRunRef = useRef(0);
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
@@ -619,7 +641,10 @@ export default function HomePage() {
     fetch("/api/login", { cache: "no-store" })
       .then((response) => {
         if (!response.ok) throw new Error("not authenticated");
-        if (active) setAuthChecking(false);
+        if (active) {
+          setAuthChecking(false);
+          void loadMembership();
+        }
       })
       .catch(() => {
         if (active) window.location.replace("/login");
@@ -632,6 +657,42 @@ export default function HomePage() {
       await fetch("/api/login", { method: "DELETE" });
     } finally {
       window.location.replace("/login");
+    }
+  };
+
+  async function loadMembership(silent = false) {
+    if (!silent) setMembershipLoading(true);
+    try {
+      const response = await fetch("/api/membership", { cache: "no-store" });
+      if (response.status === 401) { window.location.replace("/login"); return; }
+      const payload = await response.json() as MembershipReport & { error?: string };
+      if (!response.ok) throw new Error(payload.error || "โหลดข้อมูลสมาชิกไม่สำเร็จ");
+      setMembershipReport(payload);
+      setAvailableBalance(payload.membership.balance);
+    } catch (reason) {
+      if (!silent) toast.error(reason instanceof Error ? reason.message : "โหลดข้อมูลสมาชิกไม่สำเร็จ");
+    } finally {
+      if (!silent) setMembershipLoading(false);
+    }
+  }
+
+  const subscribe = async () => {
+    if (!window.confirm("ยืนยันสมัครสมาชิก ChatPOS 290 บาท และยอมรับค่าบริการวันละ 10 บาทหรือไม่?")) return;
+    setSubscribing(true);
+    try {
+      const response = await fetch("/api/membership", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "subscribe", acceptTerms: true }),
+      });
+      const payload = await response.json() as MembershipReport & { error?: string };
+      if (response.status === 401) { window.location.replace("/login"); return; }
+      if (!response.ok) throw new Error(payload.error || "สมัครสมาชิกไม่สำเร็จ");
+      setMembershipReport(payload);
+      toast.success("สมัครสมาชิกสำเร็จ รับโควตา PromptPay 0% จำนวน 30,000 บาทแล้ว");
+    } catch (reason) {
+      toast.error(reason instanceof Error ? reason.message : "สมัครสมาชิกไม่สำเร็จ");
+    } finally {
+      setSubscribing(false);
     }
   };
 
@@ -1557,7 +1618,7 @@ export default function HomePage() {
         }),
         new Promise((resolve) => window.setTimeout(resolve, 650)),
       ]);
-      const payload = await response.json() as { error?: string };
+      const payload = await response.json() as { error?: string; membership?: MembershipReport["membership"]; transaction?: { fee?: number; netAmount?: number; freeQuotaApplied?: number } };
       if (response.status === 401) {
         window.location.replace("/login");
         return;
@@ -1571,9 +1632,18 @@ export default function HomePage() {
         status: "สำเร็จ",
       };
       setTransactions((current) => [txn, ...current]);
-      setAvailableBalance((current) => current + finalAmount);
+      setAvailableBalance((current) => current + Number(payload.transaction?.netAmount ?? finalAmount));
+      if (payload.membership) {
+        setMembershipReport((current) => current ? { ...current, membership: payload.membership! } : current);
+        void loadMembership(true);
+      }
       setCart([]);
       setDialogStage("success");
+      if (payload.transaction?.freeQuotaApplied) {
+        toast.success(`ใช้โควตา PromptPay 0% ฿${money.format(payload.transaction.freeQuotaApplied)}`);
+      } else if (payload.transaction?.fee) {
+        toast.info(`ค่าธรรมเนียมรายการนี้ ฿${money.format(payload.transaction.fee)}`);
+      }
 
       if (voiceEnabled) {
         speakThai(
@@ -1819,6 +1889,21 @@ export default function HomePage() {
         <button className="balance-strip" onClick={() => go("transactions")}>
           <span><b>ยอดรับวันนี้</b><strong>฿{money.format(todayTotal)}</strong></span>
           <span><b>พร้อมถอน</b><strong>฿{money.format(availableBalance)}</strong></span>
+          <ChevronRight />
+        </button>
+
+        <button className={`membership-home-card ${membershipReport?.membership.isSubscriber ? "subscriber" : "standard"}`} onClick={() => go("membership")}>
+          <span><ShieldCheck /></span>
+          <div>
+            <small>{membershipReport?.membership.isSubscriber ? "CHATPOS SUBSCRIBER" : "ร้านแบบค่าธรรมเนียมปกติ"}</small>
+            <strong>{membershipReport?.membership.isSubscriber
+              ? `PromptPay 0% เหลือ ฿${money.format(membershipReport.membership.promptpay.remaining)}`
+              : "สมัครสมาชิก รับ PromptPay 0%"}</strong>
+            <p>{membershipReport?.membership.isSubscriber
+              ? `ใช้แล้ว ฿${money.format(membershipReport.membership.promptpay.used)} จาก ฿30,000 · เหลือ ${membershipReport.membership.promptpay.daysRemaining} วัน`
+              : "ค่าสมัครครั้งแรก 290 บาท · ค่าบริการวันละ 10 บาท"}</p>
+            {membershipReport?.membership.status === "past_due" && <em>มียอดค่าบริการค้าง ฿{money.format(membershipReport.membership.outstanding)}</em>}
+          </div>
           <ChevronRight />
         </button>
 
@@ -2286,6 +2371,56 @@ export default function HomePage() {
     </>
   );
 
+  const MembershipScreen = () => {
+    const report = membershipReport;
+    const member = report?.membership;
+    return (
+      <>
+        <AppHeader title="สมาชิก ChatPOS" onBack={goBack} />
+        <main className="screen content-screen membership-screen">
+          {membershipLoading && !report ? <div className="membership-loading"><RotateCcw /><strong>กำลังตรวจสอบสถานะสมาชิก...</strong></div> : <>
+            <section className={`membership-hero ${member?.isSubscriber ? "subscriber" : "standard"}`}>
+              <header><span><ShieldCheck /></span><div><small>{member?.isSubscriber ? "SUBSCRIBER PLAN" : "STANDARD PLAN"}</small><h2>{member?.isSubscriber ? "ร้านสมาชิก ChatPOS" : "ร้านแบบค่าธรรมเนียมปกติ"}</h2></div><b>{member?.status === "past_due" ? "มียอดค้าง" : member?.isSubscriber ? "สมาชิก" : "ปกติ"}</b></header>
+              {member?.isSubscriber ? <>
+                <div className="membership-quota-head"><span><small>โควตา PromptPay 0%</small><strong>เหลือ ฿{money.format(member.promptpay.remaining)}</strong></span><span><small>ใช้แล้ว</small><strong>฿{money.format(member.promptpay.used)}</strong></span></div>
+                <div className="membership-progress"><i style={{ width: `${member.promptpay.usagePercent}%` }} /></div>
+                <p>วงเงินรอบละ ฿{money.format(member.promptpay.quota)} · รอบใหม่ใน {member.promptpay.daysRemaining} วัน</p>
+                <div className="membership-cycle"><span><small>เริ่มรอบ</small><strong>{member.promptpay.cycleStart ? memberDate.format(new Date(`${member.promptpay.cycleStart}T12:00:00+07:00`)) : "—"}</strong></span><span><small>รับโควตาใหม่</small><strong>{member.promptpay.cycleEnd ? memberDate.format(new Date(`${member.promptpay.cycleEnd}T12:00:00+07:00`)) : "—"}</strong></span></div>
+              </> : <>
+                <h3>ลดค่าธรรมเนียม PromptPay เหลือ 0%</h3>
+                <p>รับโควตา 30,000 บาททุก 30 วัน และคิดเพียง 1% เฉพาะยอดที่เกินโควตา</p>
+                <button className="membership-subscribe" disabled={subscribing} onClick={() => void subscribe()}><Sparkles /> {subscribing ? "กำลังสมัคร..." : "สมัครสมาชิก 290 บาท"}</button>
+                <small className="membership-terms">หลังสมัครมีค่าบริการวันละ 10 บาท หากยอดไม่พอ ระบบจะสะสมและหักในวันถัดไป</small>
+              </>}
+            </section>
+
+            <section className="membership-rate-grid">
+              <article><QrCode /><span><small>PromptPay</small><strong>{member?.rates.promptpay ?? "1.5%"}</strong><p>{member?.isSubscriber ? `เกินโควตา ${member.rates.promptpayOverQuota}` : "อัตราปกติของระบบ"}</p></span></article>
+              <article><CreditCard /><span><small>VISA</small><strong>{member?.rates.visa ?? "3.25%"}</strong><p>{member?.isSubscriber ? "อัตราสมาชิก" : "อัตราปกติ"}</p></span></article>
+              <article><WalletCards /><span><small>กระเป๋าเงิน</small><strong>{member?.rates.wallet ?? "3.00%"}</strong><p>{member?.isSubscriber ? "อัตราสมาชิก" : "อัตราปกติ"}</p></span></article>
+            </section>
+
+            {member?.isSubscriber && <section className="membership-billing-summary">
+              <header><ReceiptText /><div><small>บัญชีค่าบริการ</small><h2>รายงานการตัดค่าบริการ</h2></div><button onClick={() => void loadMembership()}><RotateCcw /> อัปเดต</button></header>
+              <div><span><small>ค่าบริการรายวัน</small><strong>฿{money.format(member.dailyFee)}</strong></span><span><small>ยอดค้างสะสม</small><strong className={member.outstanding > 0 ? "danger" : ""}>฿{money.format(member.outstanding)}</strong></span><span><small>ยอดบัญชีระบบ</small><strong>฿{money.format(member.balance)}</strong></span></div>
+              <p>ระบบจะหักยอดค้างเก่าก่อนโดยอัตโนมัติเมื่อร้านมียอดเงินเข้าระบบ</p>
+            </section>}
+
+            {member?.isSubscriber && <section className="membership-ledger">
+              <header><div><small>ย้อนหลังล่าสุด</small><h2>ประวัติค่าบริการ</h2></div></header>
+              <div>{report?.charges.slice(0, 60).map((charge) => <article key={charge.id}><span className={charge.status}><ReceiptText /></span><div><strong>{charge.description}</strong><small>กำหนด {memberDate.format(new Date(`${charge.dueDate}T12:00:00+07:00`))}</small></div><b>฿{money.format(charge.amount)}</b><em className={charge.status}>{charge.status === "paid" ? "หักแล้ว" : "ยอดค้าง"}</em></article>)}{!report?.charges.length && <p className="membership-empty">ยังไม่มีรายการค่าบริการ</p>}</div>
+            </section>}
+
+            <section className="membership-ledger transactions">
+              <header><div><small>ค่าธรรมเนียมจริง</small><h2>รายงานการใช้โควตา</h2></div></header>
+              <div>{report?.transactions.slice(0, 60).map((transaction) => <article key={transaction.id}><span className="paid"><QrCode /></span><div><strong>{methods[transaction.method as PaymentMethod]?.name ?? transaction.method}</strong><small>{memberDate.format(new Date(transaction.createdAt))} · ยอด ฿{money.format(transaction.amount)}</small></div><b>{transaction.freeQuotaApplied > 0 ? `ฟรี ฿${money.format(transaction.freeQuotaApplied)}` : `ค่าธรรมเนียม ฿${money.format(transaction.fee)}`}</b><em>{transaction.feeRate}%</em></article>)}{!report?.transactions.length && <p className="membership-empty">ยังไม่มีรายการรับชำระ</p>}</div>
+            </section>
+          </>}
+        </main>
+      </>
+    );
+  };
+
   const SettingsScreen = () => (
     <>
       <AppHeader title="ตั้งค่า" onBack={goBack} />
@@ -2296,6 +2431,7 @@ export default function HomePage() {
           <button><Building2 /><span><strong>ข้อมูลร้านค้า</strong><small>ชื่อร้าน ที่อยู่ และข้อมูลติดต่อ</small></span><ChevronRight /></button>
           <button onClick={() => go("withdraw")}><Landmark /><span><strong>บัญชีรับเงิน</strong><small>บัญชีหลัก ···· 1234</small></span><ChevronRight /></button>
           <button onClick={() => go("transactions")}><ReceiptText /><span><strong>รายการและรายงาน</strong><small>ตรวจสอบยอดรับและยอดถอน</small></span><ChevronRight /></button>
+          <button onClick={() => go("membership")}><ShieldCheck /><span><strong>สมาชิกและค่าธรรมเนียม</strong><small>{membershipReport?.membership.isSubscriber ? `สมาชิก · โควตาเหลือ ฿${money.format(membershipReport.membership.promptpay.remaining)}` : "สมัครสมาชิกและดูอัตราค่าธรรมเนียม"}</small></span><ChevronRight /></button>
           <div className="switch-row"><Bell /><span><strong>แจ้งเตือนเมื่อรับเงิน</strong><small>เสียงและการแจ้งเตือนในเครื่อง</small></span><Switch defaultChecked aria-label="แจ้งเตือนเมื่อรับเงิน" /></div>
           <div className="switch-row"><ShieldCheck /><span><strong>ยืนยันก่อนทำรายการ</strong><small>เพิ่มความปลอดภัยก่อนรับและถอนเงิน</small></span><Switch defaultChecked aria-label="ยืนยันก่อนทำรายการ" /></div>
         </div>
@@ -2315,6 +2451,7 @@ export default function HomePage() {
     if (view === "tables") return <TablesScreen />;
     if (view === "pos") return <PosScreen />;
     if (view === "product-manager") return <ProductManagerScreen />;
+    if (view === "membership") return <MembershipScreen />;
     return <SettingsScreen />;
   };
 

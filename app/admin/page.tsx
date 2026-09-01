@@ -5,10 +5,10 @@ import Image from "next/image";
 import {
   Activity, BadgeCheck, BarChart3, Building2, CalendarDays, CheckCircle2, ChevronRight, CircleDollarSign,
   ClipboardCheck, Clock3, CreditCard, Eye, FileCheck2, Landmark, LayoutDashboard, Lightbulb, Link2, LogOut, Menu, PackageSearch, Phone,
-  Plus, QrCode, RefreshCw, ScanSearch, Search, ShieldAlert, ShieldCheck, ShieldX, Sparkles, Store, Target, TrendingUp, UserCheck, Users, WalletCards, X, XCircle,
+  Plus, QrCode, ReceiptText, RefreshCw, ScanSearch, Search, ShieldAlert, ShieldCheck, ShieldX, Sparkles, Store, Target, TrendingUp, UserCheck, Users, WalletCards, X, XCircle,
 } from "lucide-react";
 
-type Tab = "dashboard" | "kyc" | "merchants" | "catalog" | "agents" | "reports";
+type Tab = "dashboard" | "kyc" | "merchants" | "catalog" | "memberships" | "agents" | "reports";
 type AiFocus = "overview" | "kyc" | "payments" | "agents";
 type Merchant = {
   id: string; applicationNumber: string; phone: string; name: string; address: string; businessDescription: string;
@@ -50,6 +50,21 @@ type CatalogOverview = {
   summary: { totalProducts: number; activeProducts: number; flaggedProducts: number; openAlerts: number };
   merchants: CatalogMerchant[]; products: CatalogProduct[]; alerts: ModerationAlert[]; checkedAt: string;
 };
+type MembershipMerchant = {
+  id: string; applicationNumber: string; phone: string; name: string; businessDescription: string;
+  plan: string; status: string; startedAt: string | null; cycleStart: string | null; cycleEnd: string | null;
+  quota: number; used: number; remaining: number; usagePercent: number; outstanding: number; balance: number;
+  serviceFeesPaid: number; transactionFeesPaid: number; transactionCount: number; transactionTotal: number; lifetimeFreeQuota: number;
+};
+type MembershipCharge = {
+  id: string; merchantId: string; type: string; amount: number; dueDate: string; status: string; description: string;
+  paymentSource: string; attemptCount: number; paidAt: string | null; createdAt: string;
+  applicationNumber: string; phone: string; merchantName: string;
+};
+type MembershipOverview = {
+  summary: { totalMerchants: number; subscribers: number; standardMerchants: number; pastDue: number; outstanding: number; serviceFeesCollected: number; transactionFeesCollected: number };
+  merchants: MembershipMerchant[]; charges: MembershipCharge[]; checkedAt: string;
+};
 
 const money = new Intl.NumberFormat("th-TH", { style: "currency", currency: "THB", minimumFractionDigits: 0, maximumFractionDigits: 0 });
 const number = new Intl.NumberFormat("th-TH");
@@ -79,6 +94,7 @@ function shiftDate(date: string, days: number) {
 const tabs: Array<{ id: Tab; label: string; icon: typeof Store }> = [
   { id: "dashboard", label: "ภาพรวม", icon: LayoutDashboard }, { id: "kyc", label: "ตรวจ KYC", icon: ClipboardCheck },
   { id: "merchants", label: "ร้านค้า", icon: Store }, { id: "catalog", label: "สินค้า & AI", icon: PackageSearch }, { id: "agents", label: "ตัวแทน", icon: Users },
+  { id: "memberships", label: "สมาชิก", icon: CircleDollarSign },
   { id: "reports", label: "รายงาน", icon: BarChart3 },
 ];
 
@@ -184,6 +200,7 @@ export default function AdminPage() {
   const [tab, setTab] = useState<Tab>("dashboard");
   const [data, setData] = useState<Overview | null>(null);
   const [catalog, setCatalog] = useState<CatalogOverview | null>(null);
+  const [memberships, setMemberships] = useState<MembershipOverview | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
@@ -207,19 +224,23 @@ export default function AdminPage() {
     setError("");
     try {
       const query = new URLSearchParams({ from: dateFrom, to: dateTo });
-      const [response, catalogResponse] = await Promise.all([
+      const [response, catalogResponse, membershipResponse] = await Promise.all([
         fetch(`/api/admin/overview?${query}`, { cache: "no-store" }),
         fetch("/api/admin/catalog", { cache: "no-store" }),
+        fetch("/api/admin/memberships", { cache: "no-store" }),
       ]);
-      if (response.status === 401 || catalogResponse.status === 401) { window.location.replace("/admin/login"); return; }
-      const [payload, catalogPayload] = await Promise.all([
+      if (response.status === 401 || catalogResponse.status === 401 || membershipResponse.status === 401) { window.location.replace("/admin/login"); return; }
+      const [payload, catalogPayload, membershipPayload] = await Promise.all([
         response.json() as Promise<Overview & { error?: string }>,
         catalogResponse.json() as Promise<CatalogOverview & { error?: string }>,
+        membershipResponse.json() as Promise<MembershipOverview & { error?: string }>,
       ]);
       if (!response.ok) throw new Error(payload.error || "โหลดข้อมูลไม่สำเร็จ");
       if (!catalogResponse.ok) throw new Error(catalogPayload.error || "โหลดข้อมูลสินค้าไม่สำเร็จ");
+      if (!membershipResponse.ok) throw new Error(membershipPayload.error || "โหลดข้อมูลสมาชิกไม่สำเร็จ");
       setData(payload);
       setCatalog(catalogPayload);
+      setMemberships(membershipPayload);
       previousAlertCountRef.current = catalogPayload.summary.openAlerts;
       document.title = catalogPayload.summary.openAlerts ? `(${catalogPayload.summary.openAlerts}) สินค้าเสี่ยง | ChatPOS` : "ChatPOS Backoffice";
       setSelectedAgents(Object.fromEntries(payload.merchants.map((merchant) => [merchant.id, merchant.agentId ?? ""])));
@@ -273,6 +294,10 @@ export default function AdminPage() {
     return data.merchants.filter((merchant) => !term || `${merchant.name} ${merchant.phone} ${merchant.applicationNumber} ${merchant.agentCode ?? ""} ${merchant.businessDescription}`.toLocaleLowerCase("th-TH").includes(term));
   }, [data, search]);
   const pendingMerchants = useMemo(() => filteredMerchants.filter((merchant) => merchant.kycStatus === "pending"), [filteredMerchants]);
+  const filteredMemberships = useMemo(() => {
+    const term = search.trim().toLocaleLowerCase("th-TH");
+    return memberships?.merchants.filter((merchant) => !term || `${merchant.name} ${merchant.phone} ${merchant.applicationNumber} ${merchant.businessDescription}`.toLocaleLowerCase("th-TH").includes(term)) ?? [];
+  }, [memberships, search]);
   const filteredCatalogProducts = useMemo(() => {
     if (!catalog) return [];
     const term = search.trim().toLocaleLowerCase("th-TH");
@@ -399,10 +424,12 @@ export default function AdminPage() {
 
   const MerchantCard = ({ merchant, compact = false }: { merchant: Merchant; compact?: boolean }) => {
     const merchantCatalog = catalog?.merchants.find((item) => item.id === merchant.id);
+    const merchantMembership = memberships?.merchants.find((item) => item.id === merchant.id);
     return <article className={`admin-merchant-card ${compact ? "compact" : ""}`}>
       <header><div className="admin-avatar"><Store /></div><div><strong>{merchant.name}</strong><small>{merchant.applicationNumber} · {merchant.phone}</small></div><StatusPill status={merchant.kycStatus} /></header>
       <div className="admin-merchant-meta"><span><Building2 /> {merchant.businessDescription}</span><span><Link2 /> {merchant.agentName ? `${merchant.agentName} (${merchant.agentCode})` : "ยังไม่ผูกตัวแทน"}</span></div>
       <div className="admin-mini-stats"><span><b>{number.format(merchant.orderCount)}</b><small>ออเดอร์</small></span><span><b>{money.format(merchant.orderTotal)}</b><small>ยอดใช้งาน</small></span><span><b>{number.format(merchant.tableCount)}</b><small>โต๊ะ</small></span></div>
+      <button className={`admin-membership-brief ${merchantMembership?.plan === "subscriber" ? "subscriber" : "standard"}`} onClick={() => setTab("memberships")}><CircleDollarSign /><span><strong>{merchantMembership?.plan === "subscriber" ? "ร้านสมาชิก" : "ร้านค่าธรรมเนียมปกติ"}</strong><small>{merchantMembership?.plan === "subscriber" ? `PromptPay ฟรีเหลือ ${money.format(merchantMembership.remaining)}${merchantMembership.outstanding ? ` · ค้าง ${money.format(merchantMembership.outstanding)}` : ""}` : "PromptPay 1.5% · ยังไม่สมัครสมาชิก"}</small></span><ChevronRight /></button>
       <button className={`admin-view-products ${(merchantCatalog?.flaggedCount ?? 0) > 0 ? "has-risk" : ""}`} onClick={() => openMerchantCatalog(merchant.id)}><PackageSearch /><span><strong>ดูสินค้าของร้านนี้</strong><small>{number.format(merchantCatalog?.productCount ?? 0)} รายการ{merchantCatalog?.flaggedCount ? ` · AI เตือน ${number.format(merchantCatalog.flaggedCount)} รายการ` : " · ไม่พบรายการเสี่ยง"}</small></span><ChevronRight /></button>
       {merchant.kycStatus === "pending" && <div className="admin-kyc-actions"><select value={selectedAgents[merchant.id] ?? merchant.agentId ?? ""} onChange={(event) => setSelectedAgents((current) => ({ ...current, [merchant.id]: event.target.value }))}><option value="">เลือกตัวแทนก่อนอนุมัติ</option>{data.agents.filter((agent) => agent.status === "active").map((agent) => <option key={agent.id} value={agent.id}>{agent.code} · {agent.name} · {agent.phone}</option>)}</select><div><button className="bind" disabled={!selectedAgents[merchant.id] || workingId === merchant.id + "bind_agent"} onClick={() => void merchantAction(merchant, "bind_agent")}><Link2 /> ผูกตัวแทน</button><button className="approve" disabled={!selectedAgents[merchant.id] || workingId === merchant.id + "approve"} onClick={() => void merchantAction(merchant, "approve")}><BadgeCheck /> อนุมัติ KYC</button><button className="reject" disabled={workingId === merchant.id + "reject"} onClick={() => void merchantAction(merchant, "reject")}><XCircle /> ไม่ผ่าน</button></div></div>}
     </article>;
@@ -412,7 +439,7 @@ export default function AdminPage() {
     <div className="admin-app">
       <aside className={menuOpen ? "open" : ""}>
         <header><span><ShieldCheck /></span><div><small>CHATPOS</small><strong>BACKOFFICE</strong></div><button onClick={() => setMenuOpen(false)}><X /></button></header>
-        <nav>{tabs.map((item) => { const Icon = item.icon; const badge = item.id === "kyc" ? data.summary.pendingKyc : item.id === "catalog" ? (catalog?.summary.openAlerts ?? 0) : 0; return <button key={item.id} className={tab === item.id ? "active" : ""} onClick={() => { setTab(item.id); setMenuOpen(false); }}><Icon /><span>{item.label}</span>{badge > 0 && <b>{badge}</b>}<ChevronRight /></button>; })}</nav>
+        <nav>{tabs.map((item) => { const Icon = item.icon; const badge = item.id === "kyc" ? data.summary.pendingKyc : item.id === "catalog" ? (catalog?.summary.openAlerts ?? 0) : item.id === "memberships" ? (memberships?.summary.pastDue ?? 0) : 0; return <button key={item.id} className={tab === item.id ? "active" : ""} onClick={() => { setTab(item.id); setMenuOpen(false); }}><Icon /><span>{item.label}</span>{badge > 0 && <b>{badge}</b>}<ChevronRight /></button>; })}</nav>
         <footer><button onClick={() => void logout()}><LogOut /> ออกจากระบบ</button><small>ChatPOS Control Center</small></footer>
       </aside>
       {menuOpen && <button className="admin-overlay" aria-label="ปิดเมนู" onClick={() => setMenuOpen(false)} />}
@@ -474,6 +501,33 @@ export default function AdminPage() {
           {tab === "kyc" && <><section className="admin-page-intro"><div><small>ขั้นตอนบังคับ</small><h2>ตรวจ KYC และผูกตัวแทน</h2><p>ร้านจะอนุมัติไม่ได้จนกว่าจะเลือกตัวแทนจากเบอร์มือถือหรือรหัสตัวแทน</p></div><span><ShieldCheck /></span></section><section className="admin-card-grid wide">{pendingMerchants.map((merchant) => <MerchantCard key={merchant.id} merchant={merchant} />)}{!pendingMerchants.length && <div className="admin-empty"><BadgeCheck /><strong>ตรวจ KYC ครบแล้ว</strong><small>ยังไม่มีใบสมัครที่รอดำเนินการ</small></div>}</section></>}
 
           {tab === "merchants" && <><section className="admin-page-intro"><div><small>MERCHANT MANAGEMENT</small><h2>ร้านค้าทั้งหมด</h2><p>ค้นหา ดูสถานะตัวแทน และยอดใช้งานของแต่ละร้าน</p></div><span><Store /></span></section><section className="admin-card-grid wide">{filteredMerchants.map((merchant) => <MerchantCard key={merchant.id} merchant={merchant} />)}{!filteredMerchants.length && <div className="admin-empty"><Search /><strong>ไม่พบร้านค้า</strong><small>ลองค้นหาด้วยชื่อ เบอร์โทร หรือเลขใบสมัคร</small></div>}</section></>}
+
+          {tab === "memberships" && memberships && <>
+            <section className="admin-page-intro membership-admin-intro"><div><small>SUBSCRIPTION & FEE CONTROL</small><h2>สมาชิกและโควตาค่าธรรมเนียม</h2><p>ตรวจสถานะสมาชิก ยอด PromptPay ฟรี ยอดเกินโควตา และค่าบริการค้างของทุกร้าน</p></div><button className="admin-primary" onClick={() => void loadData(true)}><RefreshCw /> คำนวณล่าสุด</button></section>
+            <section className="admin-membership-kpis">
+              <article className="subscriber"><BadgeCheck /><span><small>ร้านสมาชิก</small><strong>{number.format(memberships.summary.subscribers)}</strong><p>จาก {number.format(memberships.summary.totalMerchants)} ร้าน</p></span></article>
+              <article><Store /><span><small>ร้านแบบปกติ</small><strong>{number.format(memberships.summary.standardMerchants)}</strong><p>ใช้ค่าธรรมเนียมปกติ</p></span></article>
+              <article className="past-due"><Clock3 /><span><small>สมาชิกมียอดค้าง</small><strong>{number.format(memberships.summary.pastDue)}</strong><p>{money.format(memberships.summary.outstanding)}</p></span></article>
+              <article className="income"><CircleDollarSign /><span><small>ค่าบริการที่เก็บแล้ว</small><strong>{money.format(memberships.summary.serviceFeesCollected)}</strong><p>ไม่รวมค่าธรรมเนียมรายการ</p></span></article>
+            </section>
+            <section className="admin-plan-rules">
+              <article><header><span><ShieldCheck /></span><div><small>SUBSCRIBER</small><h3>สมาชิก ChatPOS</h3></div><b>290 บาท</b></header><ul><li>ค่าบริการวันละ 10 บาท</li><li>PromptPay 0% ภายใน 30,000 บาท/30 วัน</li><li>ส่วนที่เกินโควตาคิด 1%</li><li>ยอดหักไม่สำเร็จสะสมไปวันถัดไป</li></ul></article>
+              <article className="standard"><header><span><Store /></span><div><small>STANDARD</small><h3>ไม่เป็นสมาชิก</h3></div><b>ปกติ</b></header><ul><li>ไม่มีค่าสมัครและค่ารายวัน</li><li>PromptPay คิด 1.5% ทุกรายการ</li><li>VISA 3.25%</li><li>กระเป๋าเงิน 3.00%</li></ul></article>
+            </section>
+            <section className="admin-membership-directory">
+              <header><div><small>MERCHANT MEMBERSHIP</small><h2>สถานะของแต่ละร้าน</h2><p>ตัวเลขโควตาเป็นยอดของรอบ 30 วันปัจจุบัน</p></div><CircleDollarSign /></header>
+              <div>{filteredMemberships.map((merchant) => <article key={merchant.id} className={`${merchant.plan} ${merchant.status}`}>
+                <header><span><Store /></span><div><strong>{merchant.name}</strong><small>{merchant.applicationNumber} · {merchant.phone}</small></div><b>{merchant.plan === "subscriber" ? (merchant.status === "past_due" ? "สมาชิก · มียอดค้าง" : "สมาชิก") : "ปกติ"}</b></header>
+                {merchant.plan === "subscriber" ? <>
+                  <div className="admin-quota-row"><span><small>PromptPay ฟรีคงเหลือ</small><strong>{money.format(merchant.remaining)}</strong></span><span><small>ใช้แล้ว</small><strong>{money.format(merchant.used)}</strong></span><span><small>วงเงินรอบนี้</small><strong>{money.format(merchant.quota)}</strong></span></div>
+                  <div className="admin-quota-progress"><i style={{ width: `${merchant.usagePercent}%` }} /></div>
+                  <p>รอบ {merchant.cycleStart ? dateOnly.format(new Date(`${merchant.cycleStart}T12:00:00+07:00`)) : "—"} ถึง {merchant.cycleEnd ? dateOnly.format(new Date(`${merchant.cycleEnd}T12:00:00+07:00`)) : "—"}</p>
+                </> : <p className="admin-standard-note">PromptPay 1.5% · ร้านยังไม่ได้สมัครสมาชิก</p>}
+                <footer><span><small>ยอดรับชำระ</small><strong>{money.format(merchant.transactionTotal)}</strong></span><span><small>ค่าธรรมเนียมรายการ</small><strong>{money.format(merchant.transactionFeesPaid)}</strong></span><span><small>ค่าบริการที่หักแล้ว</small><strong>{money.format(merchant.serviceFeesPaid)}</strong></span><span className={merchant.outstanding > 0 ? "danger" : ""}><small>ยอดค้าง</small><strong>{money.format(merchant.outstanding)}</strong></span></footer>
+              </article>)}{!filteredMemberships.length && <div className="admin-empty"><Search /><strong>ไม่พบข้อมูลสมาชิก</strong><small>ลองค้นหาด้วยชื่อร้าน เบอร์โทร หรือเลขใบสมัคร</small></div>}</div>
+            </section>
+            <section className="admin-membership-ledger"><header><ReceiptText /><div><small>SERVICE FEE LEDGER</small><h2>ประวัติการตัดค่าบริการล่าสุด</h2></div></header><div>{memberships.charges.slice(0,100).map((charge) => <article key={charge.id}><span className={charge.status}><ReceiptText /></span><div><strong>{charge.merchantName}</strong><small>{charge.description} · {charge.applicationNumber} · ครบกำหนด {dateOnly.format(new Date(`${charge.dueDate}T12:00:00+07:00`))}</small></div><b>{money.format(charge.amount)}</b><em className={charge.status}>{charge.status === "paid" ? "หักแล้ว" : "ยอดค้าง"}</em></article>)}{!memberships.charges.length && <div className="admin-empty"><ReceiptText /><strong>ยังไม่มีรายการค่าบริการ</strong></div>}</div></section>
+          </>}
 
           {tab === "catalog" && catalog && <>
             <section className="admin-page-intro catalog-intro"><div><small>AI PRODUCT CONTROL CENTER</small><h2>ตรวจร้านและสินค้าทั้งระบบ</h2><p>AI ตรวจชื่อ หมวด และรายละเอียดทุกครั้งที่ร้านบันทึกสินค้า พร้อมพักรายการเสี่ยงและแจ้งแอดมินภายใน 5 วินาที</p></div><button className="admin-primary" onClick={() => void refreshCatalog()}><RefreshCw /> ตรวจข้อมูลล่าสุด</button></section>

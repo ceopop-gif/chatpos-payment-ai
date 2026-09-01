@@ -177,12 +177,64 @@ export const paymentTransactions = sqliteTable("payment_transactions", {
   context: text("context").notNull().default(""),
   source: text("source").notNull().default("merchant_app"),
   status: text("status").notNull().default("success"),
+  feeRateBps: integer("fee_rate_bps").notNull().default(0),
+  feeCents: integer("fee_cents").notNull().default(0),
+  netAmountCents: integer("net_amount_cents").notNull().default(0),
+  membershipPlan: text("membership_plan").notNull().default("standard"),
+  freeQuotaAppliedCents: integer("free_quota_applied_cents").notNull().default(0),
+  quotaCycleStartedAt: text("quota_cycle_started_at"),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 }, (table) => [
   uniqueIndex("payment_transactions_request_unique").on(table.clientRequestId),
   index("payment_transactions_merchant_created_idx").on(table.merchantId, table.createdAt),
   index("payment_transactions_method_created_idx").on(table.method, table.createdAt),
   index("payment_transactions_status_created_idx").on(table.status, table.createdAt),
+]);
+
+export const merchantMemberships = sqliteTable("merchant_memberships", {
+  merchantId: text("merchant_id").primaryKey().references(() => merchantApplications.id, { onDelete: "cascade" }),
+  planCode: text("plan_code").notNull().default("subscriber"),
+  status: text("status").notNull().default("active"),
+  activationFeeCents: integer("activation_fee_cents").notNull().default(29000),
+  dailyFeeCents: integer("daily_fee_cents").notNull().default(1000),
+  promptpayQuotaCents: integer("promptpay_quota_cents").notNull().default(3000000),
+  promptpayUsedCents: integer("promptpay_used_cents").notNull().default(0),
+  currentCycleStart: text("current_cycle_start").notNull(),
+  currentCycleEnd: text("current_cycle_end").notNull(),
+  lastDailyChargeDate: text("last_daily_charge_date").notNull(),
+  outstandingCents: integer("outstanding_cents").notNull().default(0),
+  startedAt: text("started_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  cancelledAt: text("cancelled_at"),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  index("merchant_memberships_status_cycle_idx").on(table.status, table.currentCycleEnd),
+]);
+
+export const merchantFinancialAccounts = sqliteTable("merchant_financial_accounts", {
+  merchantId: text("merchant_id").primaryKey().references(() => merchantApplications.id, { onDelete: "cascade" }),
+  availableBalanceCents: integer("available_balance_cents").notNull().default(0),
+  totalTransactionFeesCents: integer("total_transaction_fees_cents").notNull().default(0),
+  totalServiceFeesCents: integer("total_service_fees_cents").notNull().default(0),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const membershipChargeLedger = sqliteTable("membership_charge_ledger", {
+  id: text("id").primaryKey(),
+  merchantId: text("merchant_id").notNull().references(() => merchantApplications.id, { onDelete: "cascade" }),
+  chargeType: text("charge_type").notNull(),
+  amountCents: integer("amount_cents").notNull(),
+  dueDate: text("due_date").notNull(),
+  status: text("status").notNull().default("pending"),
+  description: text("description").notNull().default(""),
+  paymentSource: text("payment_source").notNull().default("merchant_balance"),
+  attemptCount: integer("attempt_count").notNull().default(0),
+  paidAt: text("paid_at"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  uniqueIndex("membership_charge_merchant_type_due_unique").on(table.merchantId, table.chargeType, table.dueDate),
+  index("membership_charge_merchant_status_due_idx").on(table.merchantId, table.status, table.dueDate),
+  index("membership_charge_status_due_idx").on(table.status, table.dueDate),
 ]);
 
 export const merchantSessions = sqliteTable("merchant_sessions", {
