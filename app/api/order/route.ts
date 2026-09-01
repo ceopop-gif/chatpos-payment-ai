@@ -83,18 +83,24 @@ async function getSessionOrderSummary(tableId: number, sessionId: string) {
   };
 }
 
-async function getPublicMenu() {
+async function getPublicMenu(merchantId: string | null) {
   const db = getD1();
+  if (!merchantId) return { products: defaultMenuProducts, categories: defaultMenuCategories };
   const [productResult, categoryResult] = await Promise.all([
-    db.prepare("SELECT id, name, price_cents, category, description, image_key FROM menu_products WHERE active = 1 ORDER BY id").all(),
-    db.prepare("SELECT name FROM menu_categories ORDER BY position, id").all(),
+    db.prepare(`
+      SELECT local_product_id, name, price_cents, category, description, image_key, active, moderation_status
+      FROM merchant_menu_products
+      WHERE merchant_id = ?
+      ORDER BY updated_at DESC, local_product_id
+    `).bind(merchantId).all(),
+    db.prepare("SELECT name FROM merchant_menu_categories WHERE merchant_id = ? ORDER BY position, id").bind(merchantId).all(),
   ]);
   if (!productResult.results.length) return { products: defaultMenuProducts, categories: defaultMenuCategories };
   return {
-    products: productResult.results.map((row) => ({
-      id: Number(row.id), name: String(row.name), price: Number(row.price_cents) / 100,
+    products: productResult.results.filter((row) => Boolean(row.active) && ["approved", "approved_override"].includes(String(row.moderation_status))).map((row) => ({
+      id: Number(row.local_product_id), name: String(row.name), price: Number(row.price_cents) / 100,
       category: String(row.category), description: String(row.description ?? ""),
-      image: row.image_key ? `/api/product-image/${row.id}` : null, active: true,
+      image: row.image_key ? `/api/product-image/${row.local_product_id}?merchant=${encodeURIComponent(merchantId)}` : null, active: true,
     })),
     categories: categoryResult.results.map((row) => String(row.name)),
   };
@@ -106,12 +112,22 @@ export async function GET(request: Request) {
     const token = searchParams.get("token") ?? "";
     const sessionId = searchParams.get("sessionId") ?? "";
     if (!/^[a-f0-9]{64}$/i.test(token)) return Response.json({ error: "ลิงก์โต๊ะไม่ถูกต้อง" }, { status: 400 });
-    const table = await getD1().prepare("SELECT id, name FROM restaurant_tables WHERE token = ? AND active = 1 LIMIT 1").bind(token).first();
+    const table = await getD1().prepare(`
+      SELECT t.id, t.name, t.merchant_id, m.first_name, m.last_name
+      FROM restaurant_tables t
+      LEFT JOIN merchant_applications m ON m.id = t.merchant_id
+      WHERE t.token = ? AND t.active = 1
+      LIMIT 1
+    `).bind(token).first();
     if (!table) return Response.json({ error: "ไม่พบโต๊ะ หรือลิงก์นี้ถูกปิดแล้ว" }, { status: 404 });
     const summary = /^[a-zA-Z0-9-]{8,80}$/.test(sessionId)
       ? await getSessionOrderSummary(Number(table.id), sessionId)
       : undefined;
-    return Response.json({ table: { id: Number(table.id), name: String(table.name) }, merchant: "ร้านตัวอย่าง", summary, ...(await getPublicMenu()) });
+    const merchantName = `${String(table.first_name ?? "")} ${String(table.last_name ?? "")}`.trim() || "ร้านค้า ChatPOS";
+    return Response.json({
+      table: { id: Number(table.id), name: String(table.name) }, merchant: merchantName, summary,
+      ...(await getPublicMenu(table.merchant_id ? String(table.merchant_id) : null)),
+    });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "เปิดเมนูไม่สำเร็จ" }, { status: 500 });
   }
@@ -148,10 +164,10 @@ export async function POST(request: Request) {
       });
     }
 
-    const table = await db.prepare("SELECT id, name FROM restaurant_tables WHERE token = ? AND active = 1 LIMIT 1").bind(token).first();
+    const table = await db.prepare("SELECT id, name, merchant_id FROM restaurant_tables WHERE token = ? AND active = 1 LIMIT 1").bind(token).first();
     if (!table) return Response.json({ error: "ไม่พบโต๊ะ หรือลิงก์นี้ถูกปิดแล้ว" }, { status: 404 });
 
-    const menu = await getPublicMenu();
+    const menu = await getPublicMenu(table.merchant_id ? String(table.merchant_id) : null);
     const menuMap = new Map(menu.products.map((product) => [Number(product.id), product]));
     const normalizedItems = requestedItems.flatMap((item) => {
       const product = menuMap.get(Number(item.productId));

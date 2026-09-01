@@ -1,13 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import Image from "next/image";
 import {
   Activity, BadgeCheck, BarChart3, Building2, CalendarDays, CheckCircle2, ChevronRight, CircleDollarSign,
-  ClipboardCheck, Clock3, CreditCard, FileCheck2, Landmark, LayoutDashboard, Lightbulb, Link2, LogOut, Menu, Phone,
-  Plus, QrCode, RefreshCw, Search, ShieldAlert, ShieldCheck, Sparkles, Store, Target, TrendingUp, UserCheck, Users, WalletCards, X, XCircle,
+  ClipboardCheck, Clock3, CreditCard, Eye, FileCheck2, Landmark, LayoutDashboard, Lightbulb, Link2, LogOut, Menu, PackageSearch, Phone,
+  Plus, QrCode, RefreshCw, ScanSearch, Search, ShieldAlert, ShieldCheck, ShieldX, Sparkles, Store, Target, TrendingUp, UserCheck, Users, WalletCards, X, XCircle,
 } from "lucide-react";
 
-type Tab = "dashboard" | "kyc" | "merchants" | "agents" | "reports";
+type Tab = "dashboard" | "kyc" | "merchants" | "catalog" | "agents" | "reports";
 type AiFocus = "overview" | "kyc" | "payments" | "agents";
 type Merchant = {
   id: string; applicationNumber: string; phone: string; name: string; address: string; businessDescription: string;
@@ -27,6 +28,27 @@ type Overview = {
   dailyUsage: Array<{ date: string; transactionCount: number; total: number }>;
   paymentChannels: Array<{ method: string; transactionCount: number; total: number }>;
   reviews: Array<{ id: string; applicationNumber: string; merchantName: string; action: string; previousStatus: string; nextStatus: string; note: string; reviewedBy: string; createdAt: string; agentCode: string | null }>;
+};
+type CatalogMerchant = {
+  id: string; applicationNumber: string; phone: string; name: string; businessDescription: string;
+  kycStatus: string; productCount: number; flaggedCount: number;
+};
+type CatalogProduct = {
+  id: string; merchantId: string; localProductId: number; name: string; price: number; category: string;
+  description: string; image: string | null; active: boolean; moderationStatus: string; riskLevel: string;
+  riskCategory: string; riskReason: string; matchedTerms: string[]; scannedAt: string; updatedAt: string;
+  applicationNumber: string; merchantPhone: string; merchantName: string; businessDescription: string;
+  agentCode: string | null; agentName: string | null;
+};
+type ModerationAlert = {
+  id: string; merchantId: string; productId: string; localProductId: number; productName: string;
+  severity: string; category: string; reason: string; matchedTerms: string[]; status: string;
+  reviewedBy: string | null; reviewNote: string; reviewedAt: string | null; createdAt: string; updatedAt: string;
+  applicationNumber: string; phone: string; merchantName: string;
+};
+type CatalogOverview = {
+  summary: { totalProducts: number; activeProducts: number; flaggedProducts: number; openAlerts: number };
+  merchants: CatalogMerchant[]; products: CatalogProduct[]; alerts: ModerationAlert[]; checkedAt: string;
 };
 
 const money = new Intl.NumberFormat("th-TH", { style: "currency", currency: "THB", minimumFractionDigits: 0, maximumFractionDigits: 0 });
@@ -56,7 +78,7 @@ function shiftDate(date: string, days: number) {
 }
 const tabs: Array<{ id: Tab; label: string; icon: typeof Store }> = [
   { id: "dashboard", label: "ภาพรวม", icon: LayoutDashboard }, { id: "kyc", label: "ตรวจ KYC", icon: ClipboardCheck },
-  { id: "merchants", label: "ร้านค้า", icon: Store }, { id: "agents", label: "ตัวแทน", icon: Users },
+  { id: "merchants", label: "ร้านค้า", icon: Store }, { id: "catalog", label: "สินค้า & AI", icon: PackageSearch }, { id: "agents", label: "ตัวแทน", icon: Users },
   { id: "reports", label: "รายงาน", icon: BarChart3 },
 ];
 
@@ -66,6 +88,14 @@ function statusLabel(status: string) {
 
 function StatusPill({ status }: { status: string }) {
   return <span className={`admin-status ${status}`}><i />{statusLabel(status)}</span>;
+}
+
+function riskLabel(level: string) {
+  return level === "critical" ? "วิกฤต" : level === "high" ? "เสี่ยงสูง" : level === "medium" ? "ตรวจเพิ่ม" : "ผ่าน AI";
+}
+
+function riskCategoryLabel(category: string) {
+  return category === "illegal_drugs" ? "ยาเสพติด/สารควบคุม" : category === "illegal_weapons" ? "อาวุธผิดกฎหมาย" : category === "prohibited_goods" ? "สินค้าต้องห้าม" : "ไม่พบความเสี่ยง";
 }
 
 const aiFocusOptions: Array<{ id: AiFocus; label: string }> = [
@@ -153,6 +183,7 @@ function buildAiSummary(data: Overview, focus: AiFocus) {
 export default function AdminPage() {
   const [tab, setTab] = useState<Tab>("dashboard");
   const [data, setData] = useState<Overview | null>(null);
+  const [catalog, setCatalog] = useState<CatalogOverview | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
@@ -168,17 +199,29 @@ export default function AdminPage() {
   const [dateFrom, setDateFrom] = useState(() => inputDate());
   const [dateTo, setDateTo] = useState(() => inputDate());
   const [aiFocus, setAiFocus] = useState<AiFocus>("overview");
+  const [selectedMerchantId, setSelectedMerchantId] = useState("");
+  const previousAlertCountRef = useRef<number | null>(null);
 
   const loadData = useCallback(async (silent = false) => {
     if (silent) setRefreshing(true); else setLoading(true);
     setError("");
     try {
       const query = new URLSearchParams({ from: dateFrom, to: dateTo });
-      const response = await fetch(`/api/admin/overview?${query}`, { cache: "no-store" });
-      if (response.status === 401) { window.location.replace("/admin/login"); return; }
-      const payload = await response.json() as Overview & { error?: string };
+      const [response, catalogResponse] = await Promise.all([
+        fetch(`/api/admin/overview?${query}`, { cache: "no-store" }),
+        fetch("/api/admin/catalog", { cache: "no-store" }),
+      ]);
+      if (response.status === 401 || catalogResponse.status === 401) { window.location.replace("/admin/login"); return; }
+      const [payload, catalogPayload] = await Promise.all([
+        response.json() as Promise<Overview & { error?: string }>,
+        catalogResponse.json() as Promise<CatalogOverview & { error?: string }>,
+      ]);
       if (!response.ok) throw new Error(payload.error || "โหลดข้อมูลไม่สำเร็จ");
+      if (!catalogResponse.ok) throw new Error(catalogPayload.error || "โหลดข้อมูลสินค้าไม่สำเร็จ");
       setData(payload);
+      setCatalog(catalogPayload);
+      previousAlertCountRef.current = catalogPayload.summary.openAlerts;
+      document.title = catalogPayload.summary.openAlerts ? `(${catalogPayload.summary.openAlerts}) สินค้าเสี่ยง | ChatPOS` : "ChatPOS Backoffice";
       setSelectedAgents(Object.fromEntries(payload.merchants.map((merchant) => [merchant.id, merchant.agentId ?? ""])));
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "โหลดข้อมูลไม่สำเร็จ");
@@ -187,10 +230,42 @@ export default function AdminPage() {
     }
   }, [dateFrom, dateTo]);
 
+  const refreshCatalog = useCallback(async (notifyNewAlerts = false) => {
+    const response = await fetch("/api/admin/catalog", { cache: "no-store" });
+    if (response.status === 401) { window.location.replace("/admin/login"); return; }
+    const payload = await response.json() as CatalogOverview & { error?: string };
+    if (!response.ok) throw new Error(payload.error || "โหลดข้อมูลสินค้าไม่สำเร็จ");
+    const previousCount = previousAlertCountRef.current;
+    setCatalog(payload);
+    previousAlertCountRef.current = payload.summary.openAlerts;
+    if (notifyNewAlerts && previousCount !== null && payload.summary.openAlerts > previousCount) {
+      const added = payload.summary.openAlerts - previousCount;
+      setNotice(`AI แจ้งเตือนด่วน: พบสินค้าเสี่ยงใหม่ ${number.format(added)} รายการ กรุณาเปิดเมนูสินค้า & AI`);
+      document.title = `(${payload.summary.openAlerts}) สินค้าเสี่ยง | ChatPOS`;
+      if ("vibrate" in navigator) navigator.vibrate([180, 80, 180]);
+    } else if (!payload.summary.openAlerts) {
+      document.title = "ChatPOS Backoffice";
+    }
+  }, []);
+
   useEffect(() => {
     const timer = window.setTimeout(() => void loadData(), 0);
     return () => window.clearTimeout(timer);
   }, [loadData]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") void refreshCatalog(true).catch(() => undefined);
+    }, 5000);
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") void refreshCatalog(true).catch(() => undefined);
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", handleVisibility);
+    };
+  }, [refreshCatalog]);
 
   const filteredMerchants = useMemo(() => {
     if (!data) return [];
@@ -198,6 +273,17 @@ export default function AdminPage() {
     return data.merchants.filter((merchant) => !term || `${merchant.name} ${merchant.phone} ${merchant.applicationNumber} ${merchant.agentCode ?? ""} ${merchant.businessDescription}`.toLocaleLowerCase("th-TH").includes(term));
   }, [data, search]);
   const pendingMerchants = useMemo(() => filteredMerchants.filter((merchant) => merchant.kycStatus === "pending"), [filteredMerchants]);
+  const filteredCatalogProducts = useMemo(() => {
+    if (!catalog) return [];
+    const term = search.trim().toLocaleLowerCase("th-TH");
+    return catalog.products.filter((product) => (
+      (!selectedMerchantId || product.merchantId === selectedMerchantId)
+      && (!term || `${product.name} ${product.category} ${product.description} ${product.merchantName} ${product.merchantPhone} ${product.applicationNumber}`.toLocaleLowerCase("th-TH").includes(term))
+    ));
+  }, [catalog, search, selectedMerchantId]);
+  const activeCatalogAlerts = useMemo(() => (
+    catalog?.alerts.filter((alert) => ["open", "acknowledged"].includes(alert.status) && (!selectedMerchantId || alert.merchantId === selectedMerchantId)) ?? []
+  ), [catalog, selectedMerchantId]);
   const maxDaily = Math.max(1, ...(data?.dailyUsage.map((item) => item.total) ?? [1]));
   const aiSummary = useMemo(() => data ? buildAiSummary(data, aiFocus) : null, [data, aiFocus]);
 
@@ -220,6 +306,35 @@ export default function AdminPage() {
       setNotice(action === "approve" ? `อนุมัติ KYC ${merchant.name} แล้ว` : action === "reject" ? `บันทึกผลไม่ผ่าน KYC ${merchant.name} แล้ว` : "อัปเดตข้อมูลเรียบร้อยแล้ว");
       await loadData(true);
     } catch (reason) { setNotice(reason instanceof Error ? reason.message : "อัปเดตไม่สำเร็จ"); }
+    finally { setWorkingId(""); }
+  };
+
+  const openMerchantCatalog = (merchantId: string) => {
+    setSelectedMerchantId(merchantId);
+    setTab("catalog");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const moderationAction = async (product: CatalogProduct, action: "acknowledge" | "approve" | "remove" | "rescan") => {
+    const alert = catalog?.alerts.find((item) => item.productId === product.id && ["open", "acknowledged"].includes(item.status));
+    const confirmation = action === "approve"
+      ? `ยืนยันอนุญาตให้ขาย “${product.name}” แม้ระบบ AI จะแจ้งความเสี่ยง?`
+      : action === "remove" ? `ยืนยันปิดการขาย “${product.name}”?` : "";
+    if (confirmation && !window.confirm(confirmation)) return;
+    setWorkingId(`${product.id}-${action}`); setNotice("");
+    try {
+      const response = await fetch("/api/admin/catalog", {
+        method: "PATCH", headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          productId: product.id, alertId: alert?.id, action,
+          note: action === "approve" ? "แอดมินตรวจหลักฐานแล้วและอนุญาตให้ขาย" : action === "remove" ? "ปิดรายการหลังตรวจสอบความเสี่ยง" : "แอดมินรับทราบการแจ้งเตือน",
+        }),
+      });
+      const payload = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(payload.error || "อัปเดตผลตรวจไม่สำเร็จ");
+      setNotice(action === "approve" ? `อนุญาตให้ขาย ${product.name} แล้ว` : action === "remove" ? `ปิดรายการ ${product.name} แล้ว` : action === "rescan" ? `AI ตรวจ ${product.name} ใหม่แล้ว` : `รับทราบการแจ้งเตือน ${product.name} แล้ว`);
+      await refreshCatalog();
+    } catch (reason) { setNotice(reason instanceof Error ? reason.message : "อัปเดตผลตรวจไม่สำเร็จ"); }
     finally { setWorkingId(""); }
   };
 
@@ -282,27 +397,30 @@ export default function AdminPage() {
     return { method, ...meta, transactionCount: usage?.transactionCount ?? 0, total: usage?.total ?? 0 };
   });
 
-  const MerchantCard = ({ merchant, compact = false }: { merchant: Merchant; compact?: boolean }) => (
-    <article className={`admin-merchant-card ${compact ? "compact" : ""}`}>
+  const MerchantCard = ({ merchant, compact = false }: { merchant: Merchant; compact?: boolean }) => {
+    const merchantCatalog = catalog?.merchants.find((item) => item.id === merchant.id);
+    return <article className={`admin-merchant-card ${compact ? "compact" : ""}`}>
       <header><div className="admin-avatar"><Store /></div><div><strong>{merchant.name}</strong><small>{merchant.applicationNumber} · {merchant.phone}</small></div><StatusPill status={merchant.kycStatus} /></header>
       <div className="admin-merchant-meta"><span><Building2 /> {merchant.businessDescription}</span><span><Link2 /> {merchant.agentName ? `${merchant.agentName} (${merchant.agentCode})` : "ยังไม่ผูกตัวแทน"}</span></div>
       <div className="admin-mini-stats"><span><b>{number.format(merchant.orderCount)}</b><small>ออเดอร์</small></span><span><b>{money.format(merchant.orderTotal)}</b><small>ยอดใช้งาน</small></span><span><b>{number.format(merchant.tableCount)}</b><small>โต๊ะ</small></span></div>
+      <button className={`admin-view-products ${(merchantCatalog?.flaggedCount ?? 0) > 0 ? "has-risk" : ""}`} onClick={() => openMerchantCatalog(merchant.id)}><PackageSearch /><span><strong>ดูสินค้าของร้านนี้</strong><small>{number.format(merchantCatalog?.productCount ?? 0)} รายการ{merchantCatalog?.flaggedCount ? ` · AI เตือน ${number.format(merchantCatalog.flaggedCount)} รายการ` : " · ไม่พบรายการเสี่ยง"}</small></span><ChevronRight /></button>
       {merchant.kycStatus === "pending" && <div className="admin-kyc-actions"><select value={selectedAgents[merchant.id] ?? merchant.agentId ?? ""} onChange={(event) => setSelectedAgents((current) => ({ ...current, [merchant.id]: event.target.value }))}><option value="">เลือกตัวแทนก่อนอนุมัติ</option>{data.agents.filter((agent) => agent.status === "active").map((agent) => <option key={agent.id} value={agent.id}>{agent.code} · {agent.name} · {agent.phone}</option>)}</select><div><button className="bind" disabled={!selectedAgents[merchant.id] || workingId === merchant.id + "bind_agent"} onClick={() => void merchantAction(merchant, "bind_agent")}><Link2 /> ผูกตัวแทน</button><button className="approve" disabled={!selectedAgents[merchant.id] || workingId === merchant.id + "approve"} onClick={() => void merchantAction(merchant, "approve")}><BadgeCheck /> อนุมัติ KYC</button><button className="reject" disabled={workingId === merchant.id + "reject"} onClick={() => void merchantAction(merchant, "reject")}><XCircle /> ไม่ผ่าน</button></div></div>}
-    </article>
-  );
+    </article>;
+  };
 
   return (
     <div className="admin-app">
       <aside className={menuOpen ? "open" : ""}>
         <header><span><ShieldCheck /></span><div><small>CHATPOS</small><strong>BACKOFFICE</strong></div><button onClick={() => setMenuOpen(false)}><X /></button></header>
-        <nav>{tabs.map((item) => { const Icon = item.icon; return <button key={item.id} className={tab === item.id ? "active" : ""} onClick={() => { setTab(item.id); setMenuOpen(false); }}><Icon /><span>{item.label}</span>{item.id === "kyc" && data.summary.pendingKyc > 0 && <b>{data.summary.pendingKyc}</b>}<ChevronRight /></button>; })}</nav>
+        <nav>{tabs.map((item) => { const Icon = item.icon; const badge = item.id === "kyc" ? data.summary.pendingKyc : item.id === "catalog" ? (catalog?.summary.openAlerts ?? 0) : 0; return <button key={item.id} className={tab === item.id ? "active" : ""} onClick={() => { setTab(item.id); setMenuOpen(false); }}><Icon /><span>{item.label}</span>{badge > 0 && <b>{badge}</b>}<ChevronRight /></button>; })}</nav>
         <footer><button onClick={() => void logout()}><LogOut /> ออกจากระบบ</button><small>ChatPOS Control Center</small></footer>
       </aside>
       {menuOpen && <button className="admin-overlay" aria-label="ปิดเมนู" onClick={() => setMenuOpen(false)} />}
 
       <section className="admin-workspace">
         <header className="admin-topbar"><button className="admin-menu-button" onClick={() => setMenuOpen(true)}><Menu /></button><div><small>ระบบหลังบ้าน ChatPOS</small><h1>{tabs.find((item) => item.id === tab)?.label}</h1></div><div className="admin-top-actions"><label><Search /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="ค้นหาร้าน เบอร์ หรือรหัส..." /></label><button onClick={() => void loadData(true)} className={refreshing ? "spinning" : ""}><RefreshCw /></button></div></header>
-        {notice && <div className="admin-notice"><CheckCircle2 /><span>{notice}</span><button onClick={() => setNotice("")}><X /></button></div>}
+        {notice && <div className={`admin-notice ${notice.includes("AI แจ้งเตือนด่วน") ? "urgent" : ""}`}>{notice.includes("AI แจ้งเตือนด่วน") ? <ShieldAlert /> : <CheckCircle2 />}<span>{notice}</span><button onClick={() => setNotice("")}><X /></button></div>}
+        {(catalog?.summary.openAlerts ?? 0) > 0 && <button className="admin-live-risk-alert" onClick={() => { setSelectedMerchantId(""); setTab("catalog"); }}><span><ShieldAlert /></span><div><small>AI ตรวจพบสินค้าเสี่ยง</small><strong>{number.format(catalog?.summary.openAlerts ?? 0)} รายการรอแอดมินตรวจทันที</strong></div><ChevronRight /></button>}
         <main>
           {tab === "dashboard" && <>
             <section className="admin-dashboard-title"><div><small>CHATPOS CONTROL CENTER</small><h2>ภาพรวมระบบที่ต้องรู้</h2><p>ตรวจสถานะร้านและยอดรับชำระได้จากหน้าเดียว</p></div><span><Activity /><small>ข้อมูลล่าสุด</small><strong>วันนี้</strong></span></section>
@@ -349,13 +467,51 @@ export default function AdminPage() {
               <article className="admin-panel admin-payment-channels"><header><div><small>ช่องทางชำระเงิน</small><h2>ลูกค้าจ่ายผ่านช่องทางใด</h2><p>{rangeLabel}</p></div><CreditCard /></header><div>{channelRows.map((channel) => { const Icon = channel.icon; const share = data.summary.periodUsage > 0 ? channel.total / data.summary.periodUsage * 100 : 0; return <article key={channel.method}><span className={channel.tone}><Icon /></span><div><strong>{channel.label}</strong><small>{number.format(channel.transactionCount)} รายการ · {share.toFixed(1)}%</small><i><b style={{ width: `${share}%` }} /></i></div><strong>{money.format(channel.total)}</strong></article>; })}</div></article>
             </section>
 
-            <section className="admin-dashboard-grid admin-actions-grid"><article className="admin-panel admin-attention"><header><div><small>ต้องดำเนินการ</small><h2>สถานะสำคัญ</h2></div><ShieldAlert /></header><div><button onClick={() => setTab("kyc")}><Clock3 /><span><strong>{data.summary.pendingKyc} ร้านรอ KYC</strong><small>ตรวจข้อมูลและผูกตัวแทน</small></span><ChevronRight /></button><button onClick={() => setTab("kyc")}><Link2 /><span><strong>{data.summary.unassigned} ร้านไม่มีตัวแทน</strong><small>อนุมัติไม่ได้จนกว่าจะผูกตัวแทน</small></span><ChevronRight /></button><button onClick={() => setTab("agents")}><Users /><span><strong>{data.summary.totalAgents} ตัวแทนในระบบ</strong><small>ตรวจผลงานแยกรายตัวแทน</small></span><ChevronRight /></button></div></article></section>
+            <section className="admin-dashboard-grid admin-actions-grid"><article className="admin-panel admin-attention"><header><div><small>ต้องดำเนินการ</small><h2>สถานะสำคัญ</h2></div><ShieldAlert /></header><div><button className={(catalog?.summary.openAlerts ?? 0) > 0 ? "risk" : ""} onClick={() => setTab("catalog")}><ShieldX /><span><strong>{catalog?.summary.openAlerts ?? 0} สินค้าเสี่ยงรอตรวจ</strong><small>AI พักรายการและแจ้งเตือนแอดมิน</small></span><ChevronRight /></button><button onClick={() => setTab("kyc")}><Clock3 /><span><strong>{data.summary.pendingKyc} ร้านรอ KYC</strong><small>ตรวจข้อมูลและผูกตัวแทน</small></span><ChevronRight /></button><button onClick={() => setTab("kyc")}><Link2 /><span><strong>{data.summary.unassigned} ร้านไม่มีตัวแทน</strong><small>อนุมัติไม่ได้จนกว่าจะผูกตัวแทน</small></span><ChevronRight /></button><button onClick={() => setTab("agents")}><Users /><span><strong>{data.summary.totalAgents} ตัวแทนในระบบ</strong><small>ตรวจผลงานแยกรายตัวแทน</small></span><ChevronRight /></button></div></article></section>
             <section className="admin-section-heading"><div><small>KYC ล่าสุด</small><h2>ร้านที่รอการตรวจสอบ</h2></div><button onClick={() => setTab("kyc")}>ดูทั้งหมด <ChevronRight /></button></section><section className="admin-card-grid">{pendingMerchants.slice(0, 4).map((merchant) => <MerchantCard key={merchant.id} merchant={merchant} compact />)}{!pendingMerchants.length && <div className="admin-empty"><FileCheck2 /><strong>ไม่มีร้านรอตรวจ KYC</strong><small>รายการใหม่จะแสดงที่นี่อัตโนมัติ</small></div>}</section>
           </>}
 
           {tab === "kyc" && <><section className="admin-page-intro"><div><small>ขั้นตอนบังคับ</small><h2>ตรวจ KYC และผูกตัวแทน</h2><p>ร้านจะอนุมัติไม่ได้จนกว่าจะเลือกตัวแทนจากเบอร์มือถือหรือรหัสตัวแทน</p></div><span><ShieldCheck /></span></section><section className="admin-card-grid wide">{pendingMerchants.map((merchant) => <MerchantCard key={merchant.id} merchant={merchant} />)}{!pendingMerchants.length && <div className="admin-empty"><BadgeCheck /><strong>ตรวจ KYC ครบแล้ว</strong><small>ยังไม่มีใบสมัครที่รอดำเนินการ</small></div>}</section></>}
 
           {tab === "merchants" && <><section className="admin-page-intro"><div><small>MERCHANT MANAGEMENT</small><h2>ร้านค้าทั้งหมด</h2><p>ค้นหา ดูสถานะตัวแทน และยอดใช้งานของแต่ละร้าน</p></div><span><Store /></span></section><section className="admin-card-grid wide">{filteredMerchants.map((merchant) => <MerchantCard key={merchant.id} merchant={merchant} />)}{!filteredMerchants.length && <div className="admin-empty"><Search /><strong>ไม่พบร้านค้า</strong><small>ลองค้นหาด้วยชื่อ เบอร์โทร หรือเลขใบสมัคร</small></div>}</section></>}
+
+          {tab === "catalog" && catalog && <>
+            <section className="admin-page-intro catalog-intro"><div><small>AI PRODUCT CONTROL CENTER</small><h2>ตรวจร้านและสินค้าทั้งระบบ</h2><p>AI ตรวจชื่อ หมวด และรายละเอียดทุกครั้งที่ร้านบันทึกสินค้า พร้อมพักรายการเสี่ยงและแจ้งแอดมินภายใน 5 วินาที</p></div><button className="admin-primary" onClick={() => void refreshCatalog()}><RefreshCw /> ตรวจข้อมูลล่าสุด</button></section>
+            <section className="admin-catalog-kpis">
+              <article><PackageSearch /><span><small>สินค้าทั้งหมด</small><strong>{number.format(catalog.summary.totalProducts)}</strong></span></article>
+              <article className="active"><CheckCircle2 /><span><small>เปิดขายปกติ</small><strong>{number.format(catalog.summary.activeProducts)}</strong></span></article>
+              <article className="flagged"><ShieldX /><span><small>AI พักรายการ</small><strong>{number.format(catalog.summary.flaggedProducts)}</strong></span></article>
+              <article className="alerts"><ShieldAlert /><span><small>รอแอดมินตรวจ</small><strong>{number.format(catalog.summary.openAlerts)}</strong></span></article>
+            </section>
+
+            {activeCatalogAlerts.length > 0 && <section className="admin-risk-queue">
+              <header><span><ShieldAlert /></span><div><small>แจ้งเตือนทันที</small><h2>รายการเสี่ยงที่ต้องตรวจสอบ</h2><p>สินค้าเหล่านี้ถูกปิดการแสดงผลอัตโนมัติแล้ว จนกว่าแอดมินจะอนุมัติ</p></div><b>{number.format(activeCatalogAlerts.length)}</b></header>
+              <div>{activeCatalogAlerts.map((alert) => {
+                const product = catalog.products.find((item) => item.id === alert.productId);
+                if (!product) return null;
+                return <article key={alert.id} className={alert.severity}>
+                  <span><ShieldX /></span><div><small>{riskLabel(alert.severity)} · {riskCategoryLabel(alert.category)}</small><strong>{alert.productName}</strong><p>{alert.merchantName} · {alert.applicationNumber} · {alert.phone}</p><em>{alert.reason}{alert.matchedTerms.length ? ` · พบคำ: ${alert.matchedTerms.join(", ")}` : ""}</em></div><time>{dateTime.format(new Date(alert.createdAt))}</time>
+                  <footer><button disabled={workingId === `${product.id}-acknowledge`} onClick={() => void moderationAction(product, "acknowledge")}><Eye /> รับทราบ</button><button className="approve" disabled={workingId === `${product.id}-approve`} onClick={() => void moderationAction(product, "approve")}><ShieldCheck /> อนุญาตขาย</button><button className="remove" disabled={workingId === `${product.id}-remove`} onClick={() => void moderationAction(product, "remove")}><ShieldX /> ปิดรายการ</button></footer>
+                </article>;
+              })}</div>
+            </section>}
+
+            <section className="admin-catalog-layout">
+              <aside className="admin-merchant-directory">
+                <header><Store /><div><strong>ร้านที่สมัครเข้ามา</strong><small>เลือกเพื่อดูสินค้าทั้งหมดของร้าน</small></div></header>
+                <button className={!selectedMerchantId ? "active" : ""} onClick={() => setSelectedMerchantId("")}><span><Building2 /></span><div><strong>ทุกร้าน</strong><small>{number.format(catalog.summary.totalProducts)} สินค้า</small></div><ChevronRight /></button>
+                {catalog.merchants.map((merchant) => <button key={merchant.id} className={selectedMerchantId === merchant.id ? "active" : ""} onClick={() => setSelectedMerchantId(merchant.id)}><span><Store /></span><div><strong>{merchant.name}</strong><small>{merchant.applicationNumber} · {number.format(merchant.productCount)} สินค้า</small></div>{merchant.flaggedCount > 0 ? <b>{merchant.flaggedCount}</b> : <ChevronRight />}</button>)}
+              </aside>
+              <section className="admin-product-center">
+                <header><div><small>PRODUCT CATALOG</small><h2>{selectedMerchantId ? catalog.merchants.find((merchant) => merchant.id === selectedMerchantId)?.name ?? "สินค้าของร้าน" : "สินค้าจากทุกร้าน"}</h2><p>{number.format(filteredCatalogProducts.length)} รายการ · AI ตรวจล่าสุดอัตโนมัติ</p></div><ScanSearch /></header>
+                <div className="admin-product-grid">{filteredCatalogProducts.map((product) => <article key={product.id} className={product.moderationStatus === "flagged" ? "flagged" : ""}>
+                  <div className="admin-product-image">{product.image ? <Image src={product.image} alt={product.name} width={180} height={130} unoptimized /> : <PackageSearch />}{product.moderationStatus === "flagged" && <span><ShieldAlert /> พักขาย</span>}</div>
+                  <div className="admin-product-body"><header><span className={product.moderationStatus === "approved_override" ? "override" : product.riskLevel}>{product.moderationStatus === "approved_override" ? "แอดมินอนุญาต" : riskLabel(product.riskLevel)}</span><small>{product.category}</small></header><h3>{product.name}</h3><p>{product.description || "ไม่มีรายละเอียดเพิ่มเติม"}</p><strong>{money.format(product.price)}</strong><div><small>ร้าน</small><b>{product.merchantName}</b><em>{product.applicationNumber} · {product.merchantPhone}</em></div>{product.riskLevel !== "safe" && <aside><ShieldAlert /><span><strong>{riskCategoryLabel(product.riskCategory)}</strong><small>{product.riskReason}</small>{product.matchedTerms.length > 0 && <em>คำที่พบ: {product.matchedTerms.join(", ")}</em>}</span></aside>}</div>
+                  <footer><button disabled={workingId === `${product.id}-rescan`} onClick={() => void moderationAction(product, "rescan")}><ScanSearch /> ตรวจ AI ใหม่</button>{product.moderationStatus === "flagged" && <><button className="approve" disabled={workingId === `${product.id}-approve`} onClick={() => void moderationAction(product, "approve")}><ShieldCheck /> อนุญาต</button><button className="remove" disabled={workingId === `${product.id}-remove`} onClick={() => void moderationAction(product, "remove")}><ShieldX /> ปิดสินค้า</button></>}</footer>
+                </article>)}{!filteredCatalogProducts.length && <div className="admin-empty"><PackageSearch /><strong>ร้านนี้ยังไม่มีสินค้า</strong><small>เมื่อร้านเพิ่มสินค้า รายการจะปรากฏที่นี่และถูกตรวจโดย AI อัตโนมัติ</small></div>}</div>
+              </section>
+            </section>
+          </>}
 
           {tab === "agents" && <>
             <section className="admin-page-intro"><div><small>AGENT MANAGEMENT</small><h2>ตัวแทนในระบบ</h2><p>ค้นหาจากเบอร์มือถือ เชื่อมข้อมูลจากระบบตัวแทนกลาง หรือเพิ่มตัวแทนภายใน ChatPOS</p></div><button className="admin-primary" onClick={toggleAgentForm}><Plus /> เพิ่ม/เชื่อมตัวแทน</button></section>

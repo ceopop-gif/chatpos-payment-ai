@@ -57,6 +57,13 @@
       "when": 1788245130509,
       "tag": "0007_sticky_morbius",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1788247166905,
+      "tag": "0008_lovely_betty_ross",
+      "breakpoints": true
     }
   ]
 }

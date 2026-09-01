@@ -64,6 +64,7 @@ import { Switch } from "@/components/ui/switch";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
 import { QRCodeSVG } from "qrcode.react";
+import { scanProductRisk } from "@/lib/product-moderation";
 
 type View =
   | "home"
@@ -1723,6 +1724,8 @@ export default function HomePage() {
     if (!name) return toast.error("กรุณากรอกชื่อสินค้า");
     if (!Number.isFinite(parsedPrice) || parsedPrice <= 0) return toast.error("กรุณากรอกราคาสินค้ามากกว่า 0 บาท");
     const price = Math.round(parsedPrice * 100) / 100;
+    const risk = scanProductRisk({ name, category: productCategory, description: productDescription });
+    const approvedForSale = risk.shouldBlock ? false : productActive;
 
     if (editingProductId !== null) {
       setCatalog((current) => current.map((product) => product.id === editingProductId ? {
@@ -1732,9 +1735,10 @@ export default function HomePage() {
         category: productCategory,
         description: productDescription.trim(),
         image: productImage,
-        active: productActive,
+        active: approvedForSale,
       } : product));
-      toast.success(`อัปเดต ${name} เรียบร้อยแล้ว`);
+      if (risk.shouldBlock) toast.error(`AI พบข้อความเสี่ยง: ${risk.categoryLabel} ระบบพักสินค้าและแจ้งผู้ดูแลแล้ว`);
+      else toast.success(`อัปเดต ${name} เรียบร้อยแล้ว`);
     } else {
       setCatalog((current) => [{
         id: Date.now(),
@@ -1743,9 +1747,10 @@ export default function HomePage() {
         category: productCategory,
         description: productDescription.trim(),
         image: productImage,
-        active: productActive,
+        active: approvedForSale,
       }, ...current]);
-      toast.success(`บันทึก ${name} เรียบร้อยแล้ว`);
+      if (risk.shouldBlock) toast.error(`AI พบข้อความเสี่ยง: ${risk.categoryLabel} ระบบพักสินค้าและแจ้งผู้ดูแลแล้ว`);
+      else toast.success(`บันทึก ${name} เรียบร้อยแล้ว`);
     }
     resetProductForm(productCategory);
   };

@@ -115,6 +115,59 @@ export const merchantApplications = sqliteTable("merchant_applications", {
   index("merchant_applications_kyc_created_idx").on(table.kycStatus, table.createdAt),
 ]);
 
+export const merchantMenuCategories = sqliteTable("merchant_menu_categories", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  merchantId: text("merchant_id").notNull().references(() => merchantApplications.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  position: integer("position").notNull().default(0),
+}, (table) => [
+  uniqueIndex("merchant_menu_categories_merchant_name_unique").on(table.merchantId, table.name),
+  index("merchant_menu_categories_merchant_position_idx").on(table.merchantId, table.position),
+]);
+
+export const merchantMenuProducts = sqliteTable("merchant_menu_products", {
+  id: text("id").primaryKey(),
+  merchantId: text("merchant_id").notNull().references(() => merchantApplications.id, { onDelete: "cascade" }),
+  localProductId: integer("local_product_id").notNull(),
+  name: text("name").notNull(),
+  priceCents: integer("price_cents").notNull(),
+  category: text("category").notNull(),
+  description: text("description").notNull().default(""),
+  imageKey: text("image_key"),
+  active: integer("active", { mode: "boolean" }).notNull().default(true),
+  moderationStatus: text("moderation_status").notNull().default("approved"),
+  riskLevel: text("risk_level").notNull().default("safe"),
+  riskCategory: text("risk_category").notNull().default(""),
+  riskReason: text("risk_reason").notNull().default(""),
+  matchedTerms: text("matched_terms").notNull().default("[]"),
+  scannedAt: text("scanned_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  uniqueIndex("merchant_menu_products_merchant_local_unique").on(table.merchantId, table.localProductId),
+  index("merchant_menu_products_merchant_active_idx").on(table.merchantId, table.active, table.category),
+  index("merchant_menu_products_moderation_idx").on(table.moderationStatus, table.riskLevel, table.updatedAt),
+]);
+
+export const productModerationAlerts = sqliteTable("product_moderation_alerts", {
+  id: text("id").primaryKey(),
+  merchantId: text("merchant_id").notNull().references(() => merchantApplications.id, { onDelete: "cascade" }),
+  productId: text("product_id").notNull().references(() => merchantMenuProducts.id, { onDelete: "cascade" }),
+  severity: text("severity").notNull(),
+  category: text("category").notNull(),
+  reason: text("reason").notNull(),
+  matchedTerms: text("matched_terms").notNull().default("[]"),
+  status: text("status").notNull().default("open"),
+  reviewedBy: text("reviewed_by"),
+  reviewNote: text("review_note").notNull().default(""),
+  reviewedAt: text("reviewed_at"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  index("product_moderation_alerts_status_created_idx").on(table.status, table.createdAt),
+  index("product_moderation_alerts_merchant_status_idx").on(table.merchantId, table.status, table.createdAt),
+  index("product_moderation_alerts_product_status_idx").on(table.productId, table.status),
+]);
+
 export const paymentTransactions = sqliteTable("payment_transactions", {
   id: text("id").primaryKey(),
   merchantId: text("merchant_id").notNull().references(() => merchantApplications.id, { onDelete: "cascade" }),
