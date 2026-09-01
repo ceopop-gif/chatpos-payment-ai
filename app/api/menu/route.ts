@@ -1,5 +1,6 @@
 import { getBucket, getD1 } from "../../../db";
 import { defaultMenuCategories, defaultMenuProducts } from "../../../lib/menu-defaults";
+import { getMerchantSession, unauthorizedResponse } from "../../../lib/merchant-auth";
 
 type MenuProductPayload = {
   id?: number;
@@ -21,8 +22,9 @@ function decodeDataImage(value: string) {
   return { bytes, contentType: match[1] };
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
+    if (!(await getMerchantSession(request))) return unauthorizedResponse();
     const db = getD1();
     const [productResult, categoryResult] = await Promise.all([
       db.prepare("SELECT id, name, price_cents, category, description, image_key, active FROM menu_products ORDER BY id").all(),
@@ -53,6 +55,7 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
+    if (!(await getMerchantSession(request))) return unauthorizedResponse();
     const payload = (await request.json()) as { products?: MenuProductPayload[]; categories?: string[] };
     const products = Array.isArray(payload.products) ? payload.products.slice(0, 500) : [];
     const categories = Array.isArray(payload.categories)

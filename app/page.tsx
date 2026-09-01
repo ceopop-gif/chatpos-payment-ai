@@ -21,8 +21,8 @@ import {
   Home,
   ImagePlus,
   Landmark,
+  LogOut,
   Minus,
-  PackageCheck,
   PackagePlus,
   Pencil,
   Plus,
@@ -61,7 +61,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
 import { QRCodeSVG } from "qrcode.react";
@@ -541,6 +540,7 @@ function ScreenTitle({ title, subtitle }: { title: string; subtitle?: string }) 
 }
 
 export default function HomePage() {
+  const [authChecking, setAuthChecking] = useState(true);
   const [view, setView] = useState<View>("home");
   const [method, setMethod] = useState<PaymentMethod>("promptpay");
   const [amountText, setAmountText] = useState("0");
@@ -613,6 +613,27 @@ export default function HomePage() {
   const pendingOrderSoundRef = useRef(false);
   const notificationVisualTimerRef = useRef<number | null>(null);
 
+  useEffect(() => {
+    let active = true;
+    fetch("/api/login", { cache: "no-store" })
+      .then((response) => {
+        if (!response.ok) throw new Error("not authenticated");
+        if (active) setAuthChecking(false);
+      })
+      .catch(() => {
+        if (active) window.location.replace("/login");
+      });
+    return () => { active = false; };
+  }, []);
+
+  const logout = async () => {
+    try {
+      await fetch("/api/login", { method: "DELETE" });
+    } finally {
+      window.location.replace("/login");
+    }
+  };
+
   const amount = Number(amountText || 0);
   const cartTotal = useMemo(() => cart.reduce((sum, item) => sum + item.price * item.qty, 0), [cart]);
   const todayTotal = useMemo(() => transactions.filter((item) => item.amount > 0).reduce((sum, item) => sum + item.amount, 0), [transactions]);
@@ -650,7 +671,6 @@ export default function HomePage() {
     });
   }, [tableSearch, tables]);
   const activeTableOrders = useMemo(() => tableOrders.filter((order) => order.status !== "done"), [tableOrders]);
-  const doneTableOrders = useMemo(() => tableOrders.filter((order) => order.status === "done"), [tableOrders]);
   const pendingNewOrderCount = useMemo(() => tableOrders.filter((order) => order.status === "new").length, [tableOrders]);
 
   const ensureNotificationAudio = async () => {
@@ -745,8 +765,11 @@ export default function HomePage() {
   };
 
   useEffect(() => {
+    const requestedView = new URLSearchParams(window.location.search).get("view");
+    const initialView = appViews.includes(requestedView as View) ? requestedView as View : "home";
     const initialState = window.history.state && typeof window.history.state === "object" ? window.history.state : {};
-    window.history.replaceState({ ...initialState, chatposView: "home", chatposIndex: 0 }, "");
+    window.history.replaceState({ ...initialState, chatposView: initialView, chatposIndex: 0 }, "");
+    setView(initialView);
 
     const handleBrowserBack = (event: PopStateEvent) => {
       const nextView = event.state?.chatposView;
@@ -1371,26 +1394,6 @@ export default function HomePage() {
     }
   };
 
-  const markOrderDone = async (order: TableOrder) => {
-    try {
-      const response = await fetch("/api/orders", {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ id: order.id, status: "done" }),
-      });
-      if (!response.ok) throw new Error("อัปเดตออเดอร์ไม่สำเร็จ");
-      setTableOrders((current) => current.map((item) => item.id === order.id ? { ...item, status: "done" } : item));
-      setTables((current) => current.map((table) => table.id === order.tableId ? {
-        ...table,
-        orderCount: Math.max(0, table.orderCount - 1),
-        orderTotal: Math.max(0, table.orderTotal - order.total),
-      } : table));
-      toast.success(`ออเดอร์ #${order.orderNumber} เสร็จแล้ว`);
-    } catch {
-      toast.error("อัปเดตออเดอร์ไม่สำเร็จ กรุณาลองอีกครั้ง");
-    }
-  };
-
   const orderHandoffLink = (order: TableOrder) => {
     if (typeof window === "undefined") return `/handoff/${order.id}`;
     return `${window.location.origin}/handoff/${order.id}`;
@@ -1539,11 +1542,26 @@ export default function HomePage() {
     );
   };
 
-  const confirmPayment = () => {
+  const confirmPayment = async () => {
     const finalAmount = Number(amountText);
     setDialogStage("checking");
 
-    window.setTimeout(() => {
+    try {
+      const clientRequestId = `pay-${crypto.randomUUID()}`;
+      const [response] = await Promise.all([
+        fetch("/api/payments", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ clientRequestId, method, amount: finalAmount, context: paymentContext }),
+        }),
+        new Promise((resolve) => window.setTimeout(resolve, 650)),
+      ]);
+      const payload = await response.json() as { error?: string };
+      if (response.status === 401) {
+        window.location.replace("/login");
+        return;
+      }
+      if (!response.ok) throw new Error(payload.error || "บันทึกรายการชำระเงินไม่สำเร็จ");
       const txn: Transaction = {
         id: `CP-${Date.now().toString().slice(-8)}`,
         method: methods[method].name,
@@ -1563,7 +1581,10 @@ export default function HomePage() {
           ["paid_amount", ...thaiMoneyVoiceClips(finalAmount), "completed_female"],
         );
       }
-    }, 1200);
+    } catch (reason) {
+      setDialogStage("ready");
+      toast.error(reason instanceof Error ? reason.message : "บันทึกรายการชำระเงินไม่สำเร็จ");
+    }
   };
 
   const qrFileName = () => {
@@ -1999,42 +2020,28 @@ export default function HomePage() {
       <AppHeader title="ออเดอร์" onBack={goBack} />
       <main className="screen content-screen">
         <ScreenTitle title="ออเดอร์จากโต๊ะ" subtitle="อัปเดตอัตโนมัติทุก 3 วินาที พร้อมระบุโต๊ะจากลิงก์ที่ลูกค้าเปิด" />
-        <Tabs defaultValue="new" className="orders-tabs">
-          <TabsList><TabsTrigger value="new">กำลังดำเนินการ {activeTableOrders.length}</TabsTrigger><TabsTrigger value="done">เสร็จแล้ว {doneTableOrders.length}</TabsTrigger></TabsList>
-          <TabsContent value="new" className="order-stack">
-            {ordersLoading && !activeTableOrders.length ? <div className="order-loading"><Sparkles /> กำลังตรวจสอบออเดอร์ใหม่...</div> : activeTableOrders.length ? activeTableOrders.map((order) => (
-              <article className="order-card table-order-card" key={order.id}>
-                <div className="order-top"><span>#{order.orderNumber}</span><b>{order.tableName}</b></div>
-                <span className={`table-order-status ${order.status}`}>{orderStatusLabel(order.status)}</span>
-                <p>{order.items.map((item) => `${item.name} × ${item.quantity}`).join(", ")}</p>
-                {order.note && <aside><strong>หมายเหตุ:</strong> {order.note}</aside>}
-                <div className="order-handoff-row">
-                  <span><strong>ใบสั่งสำหรับผู้รับอาหาร</strong><small>ส่งลิงก์ให้ผู้รับกดรับเรื่องและรับอาหารจากครัว</small></span>
-                  <div>
-                    <button type="button" className="order-line-button" onClick={() => shareOrderToLine(order)}><Send /> ส่งไป LINE</button>
-                    <a href={orderHandoffLink(order)} target="_blank" rel="noreferrer"><ExternalLink /> เปิดใบสั่ง</a>
-                  </div>
+        <div className="orders-live-summary"><span><Sparkles /> รายการที่เปิดอยู่</span><strong>{activeTableOrders.length} ออเดอร์</strong></div>
+        <section className="order-stack" aria-label="ออเดอร์จากโต๊ะที่กำลังดำเนินการ">
+          {ordersLoading && !activeTableOrders.length ? <div className="order-loading"><Sparkles /> กำลังตรวจสอบออเดอร์ใหม่...</div> : activeTableOrders.length ? activeTableOrders.map((order) => (
+            <article className="order-card table-order-card" key={order.id}>
+              <div className="order-top"><span>#{order.orderNumber}</span><b>{order.tableName}</b></div>
+              <span className={`table-order-status ${order.status}`}>{orderStatusLabel(order.status)}</span>
+              <p>{order.items.map((item) => `${item.name} × ${item.quantity}`).join(", ")}</p>
+              {order.note && <aside><strong>หมายเหตุ:</strong> {order.note}</aside>}
+              <div className="order-handoff-row">
+                <span><strong>ใบสั่งสำหรับผู้รับอาหาร</strong><small>ส่งลิงก์ให้ผู้รับกดรับเรื่องและรับอาหารจากครัว</small></span>
+                <div>
+                  <button type="button" className="order-line-button" onClick={() => shareOrderToLine(order)}><Send /> ส่งไป LINE</button>
+                  <a href={orderHandoffLink(order)} target="_blank" rel="noreferrer"><ExternalLink /> เปิดใบสั่ง</a>
                 </div>
-                <div className="table-order-footer">
-                  <strong>฿{money.format(order.total)}</strong>
-                  <span className="table-order-actions">
-                    <button type="button" className="order-done-button" onClick={() => markOrderDone(order)}><Check /> เสร็จแล้ว</button>
-                    <button type="button" onClick={() => openMethodPicker(order.total, `${order.tableName} · #${order.orderNumber}`)}>รับชำระ <ChevronRight /></button>
-                  </span>
-                </div>
-              </article>
-            )) : <div className="empty-state"><ClipboardList /><strong>ยังไม่มีออเดอร์ใหม่</strong><p>เมื่อลูกค้าส่งรายการจากลิงก์ประจำโต๊ะ ออเดอร์จะขึ้นที่นี่อัตโนมัติ</p></div>}
-          </TabsContent>
-          <TabsContent value="done" className="order-stack">
-            {doneTableOrders.length ? doneTableOrders.map((order) => (
-              <article className="order-card table-order-card done" key={order.id}>
-                <div className="order-top"><span>#{order.orderNumber}</span><b>{order.tableName}</b></div>
-                <p>{order.items.map((item) => `${item.name} × ${item.quantity}`).join(", ")}</p>
-                <div><strong>฿{money.format(order.total)}</strong><small><CheckCircle2 /> เสร็จแล้ว</small></div>
-              </article>
-            )) : <div className="empty-state"><PackageCheck /><strong>ยังไม่มีออเดอร์ที่เสร็จแล้ว</strong><p>กด “เสร็จแล้ว” ในออเดอร์ใหม่เพื่อย้ายรายการมาที่นี่</p></div>}
-          </TabsContent>
-        </Tabs>
+              </div>
+              <div className="table-order-footer">
+                <strong>฿{money.format(order.total)}</strong>
+                <small>ติดตามสถานะจากใบสั่งด้านบน</small>
+              </div>
+            </article>
+          )) : <div className="empty-state"><ClipboardList /><strong>ยังไม่มีออเดอร์ใหม่</strong><p>เมื่อลูกค้าส่งรายการจากลิงก์ประจำโต๊ะ ออเดอร์จะขึ้นที่นี่อัตโนมัติ</p></div>}
+        </section>
       </main>
     </>
   );
@@ -2287,6 +2294,7 @@ export default function HomePage() {
           <div className="switch-row"><Bell /><span><strong>แจ้งเตือนเมื่อรับเงิน</strong><small>เสียงและการแจ้งเตือนในเครื่อง</small></span><Switch defaultChecked aria-label="แจ้งเตือนเมื่อรับเงิน" /></div>
           <div className="switch-row"><ShieldCheck /><span><strong>ยืนยันก่อนทำรายการ</strong><small>เพิ่มความปลอดภัยก่อนรับและถอนเงิน</small></span><Switch defaultChecked aria-label="ยืนยันก่อนทำรายการ" /></div>
         </div>
+        <button type="button" className="settings-logout" onClick={() => void logout()}><LogOut /> ออกจากระบบ</button>
       </main>
     </>
   );
@@ -2304,6 +2312,16 @@ export default function HomePage() {
     if (view === "product-manager") return <ProductManagerScreen />;
     return <SettingsScreen />;
   };
+
+  if (authChecking) {
+    return (
+      <div className="merchant-auth-loading">
+        <span><ShieldCheck /></span>
+        <strong>กำลังตรวจสอบการเข้าสู่ระบบ</strong>
+        <small>กรุณารอสักครู่...</small>
+      </div>
+    );
+  }
 
   return (
     <div className="site-canvas">

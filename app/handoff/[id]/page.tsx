@@ -94,6 +94,10 @@ export default function OrderHandoffPage() {
     window.location.href = `https://line.me/R/share?text=${encodeURIComponent(message)}`;
   };
 
+  const returnToOrders = () => {
+    window.location.assign("/?view=orders");
+  };
+
   if (loading) return <div className="handoff-shell"><div className="handoff-loading"><RefreshCw /><strong>กำลังเปิดใบสั่งอาหาร...</strong></div></div>;
   if (error || !order) return <div className="handoff-shell"><div className="handoff-error"><X /><strong>เปิดใบสั่งไม่ได้</strong><p>{error || "ไม่พบใบสั่งอาหาร"}</p><button type="button" onClick={() => void loadOrder(true)}><RefreshCw /> ลองใหม่</button></div></div>;
 
@@ -102,7 +106,7 @@ export default function OrderHandoffPage() {
   return (
     <div className="handoff-shell">
       <header className="handoff-header">
-        <button type="button" onClick={() => window.history.back()} aria-label="กลับหน้าก่อนหน้า"><ArrowLeft /></button>
+        <button type="button" onClick={returnToOrders} aria-label="กลับหน้าออเดอร์"><ArrowLeft /></button>
         <span><small>CHATPOS ORDER LINK</small><strong>ใบสั่งอาหาร</strong></span>
         <b><UtensilsCrossed /> {order.tableName}</b>
       </header>
