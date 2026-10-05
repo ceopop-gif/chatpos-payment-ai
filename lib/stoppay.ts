@@ -338,7 +338,7 @@ export async function verifyStopPayIdentityOtp(input: { sessionId: string; otpCo
     throw new Error(payload?.error?.message || (payload?.isExprCode ? "OTP หมดอายุ" : "OTP ไม่ถูกต้อง"));
   }
 
-  await db.prepare("UPDATE stoppay_identity_sessions SET verified_at = CURRENT_TIMESTAMP WHERE id = ?").bind(input.sessionId).run();
+  await db.prepare("UPDATE stoppay_identity_sessions SET verified_at = CURRENT_TIMESTAMP, expires_at = datetime('now', '+30 minutes') WHERE id = ?").bind(input.sessionId).run();
   return { identityToken: String(session.id) };
 }
 
