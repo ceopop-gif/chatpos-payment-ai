@@ -13,7 +13,7 @@ export default function AdminLoginPage() {
 
   useEffect(() => {
     fetch("/api/admin/login", { cache: "no-store" }).then((response) => {
-      if (response.ok) window.location.replace("/admin");
+      if (response.ok) window.location.replace(safeReturnTo);
       else setChecking(false);
     }).catch(() => setChecking(false));
   }, []);
@@ -34,7 +34,7 @@ export default function AdminLoginPage() {
       });
       const payload = await response.json() as { error?: string };
       if (!response.ok) throw new Error(payload.error || "เข้าสู่ระบบไม่สำเร็จ");
-      window.location.replace("/admin");
+      window.location.replace(safeReturnTo);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "เข้าสู่ระบบไม่สำเร็จ");
       setSubmitting(false);
