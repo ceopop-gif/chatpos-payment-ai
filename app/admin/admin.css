@@ -288,3 +288,20 @@ button { -webkit-tap-highlight-color: transparent; }
   .kyc-edit-safe-note{align-items:flex-start;flex-wrap:wrap}
   .kyc-edit-safe-note>b{width:100%;padding-left:36px}
 }
+
+
+/* ADMIN KYC EDIT ENTRY */
+.admin-kyc-edit-entry{width:100%;display:grid;grid-template-columns:48px 1fr 22px;gap:14px;align-items:center;margin:0 0 18px;padding:16px 18px;border:1px solid #bfe4d6;border-radius:18px;background:linear-gradient(135deg,#f2fbf7,#ffffff);color:#15352b;text-align:left;cursor:pointer;box-shadow:0 10px 26px rgba(21,103,78,.06)}
+.admin-kyc-edit-entry:hover{border-color:#76c5a8;box-shadow:0 14px 30px rgba(21,103,78,.10)}
+.admin-kyc-edit-entry>span{width:48px;height:48px;border-radius:14px;background:#0b7559;color:#fff;display:grid;place-items:center}
+.admin-kyc-edit-entry>span svg{width:22px;height:22px}
+.admin-kyc-edit-entry div{min-width:0}
+.admin-kyc-edit-entry small{display:block;color:#5d8376;font-size:10px;font-weight:900;letter-spacing:.08em}
+.admin-kyc-edit-entry strong{display:block;margin:2px 0;font-size:17px}
+.admin-kyc-edit-entry p{margin:0;color:#6e817a;font-size:12px;line-height:1.45}
+.admin-kyc-edit-entry>svg{width:20px;color:#0b7559}
+@media(max-width:700px){
+  .admin-kyc-edit-entry{grid-template-columns:42px 1fr 18px;padding:14px}
+  .admin-kyc-edit-entry>span{width:42px;height:42px}
+  .admin-kyc-edit-entry strong{font-size:15px}
+}
