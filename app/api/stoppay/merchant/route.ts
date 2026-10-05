@@ -13,7 +13,7 @@ export async function GET(request: Request) {
            merchant_contacted_at, merchant_response_note, hold_requested_at, created_at
     FROM stoppay_cases
     WHERE merchant_id = ?
-      AND status NOT IN ('resolved', 'rejected')
+      AND status IN ('merchant_action_required', 'merchant_contacted')
     ORDER BY created_at DESC
     LIMIT 100
   `).bind(session.applicationId).all();
