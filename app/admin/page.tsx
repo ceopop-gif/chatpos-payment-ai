@@ -5,10 +5,10 @@ import Image from "next/image";
 import {
   Activity, BadgeCheck, BarChart3, Building2, CalendarDays, CheckCircle2, ChevronRight, CircleDollarSign,
   ClipboardCheck, Clock3, CreditCard, Eye, FileCheck2, Landmark, LayoutDashboard, Lightbulb, Link2, LogOut, Menu, PackageSearch, Phone,
-  Plus, QrCode, ReceiptText, RefreshCw, ScanSearch, Search, ShieldAlert, ShieldCheck, ShieldX, Sparkles, Store, Target, TrendingUp, UserCheck, Users, WalletCards, X, XCircle,
+  Plus, QrCode, ReceiptText, RefreshCw, ScanSearch, Search, ShieldAlert, ShieldCheck, ShieldX, Sparkles, Store, Target, TrendingUp, UserCheck, Users, WalletCards, X, XCircle, LockKeyhole, UnlockKeyhole,
 } from "lucide-react";
 
-type Tab = "dashboard" | "kyc" | "merchants" | "catalog" | "memberships" | "agents" | "reports";
+type Tab = "dashboard" | "kyc" | "kyc-edit" | "merchants" | "catalog" | "memberships" | "agents" | "reports";
 type AiFocus = "overview" | "kyc" | "payments" | "agents";
 type Merchant = {
   id: string; applicationNumber: string; phone: string; name: string; address: string; businessDescription: string;
@@ -65,6 +65,15 @@ type MembershipOverview = {
   summary: { totalMerchants: number; subscribers: number; standardMerchants: number; pastDue: number; outstanding: number; serviceFeesCollected: number; transactionFeesCollected: number };
   merchants: MembershipMerchant[]; charges: MembershipCharge[]; checkedAt: string;
 };
+type KycEditMerchant = {
+  id: string; applicationNumber: string; phone: string; name: string; address: string; businessDescription: string;
+  kycStatus: string; accountStatus: string; approvedAt: string | null;
+  editAllowed: boolean; allowedBy: string | null; allowedAt: string | null; revokedAt: string | null; consumedAt: string | null; permissionNote: string;
+};
+type KycEditOverview = {
+  merchants: KycEditMerchant[];
+  summary: { totalMerchants: number; allowedMerchants: number };
+};
 
 const money = new Intl.NumberFormat("th-TH", { style: "currency", currency: "THB", minimumFractionDigits: 0, maximumFractionDigits: 0 });
 const number = new Intl.NumberFormat("th-TH");
@@ -92,7 +101,7 @@ function shiftDate(date: string, days: number) {
   return inputDate(value);
 }
 const tabs: Array<{ id: Tab; label: string; icon: typeof Store }> = [
-  { id: "dashboard", label: "ภาพรวม", icon: LayoutDashboard }, { id: "kyc", label: "ตรวจ KYC", icon: ClipboardCheck },
+  { id: "dashboard", label: "ภาพรวม", icon: LayoutDashboard }, { id: "kyc", label: "ตรวจ KYC", icon: ClipboardCheck }, { id: "kyc-edit", label: "แก้ไข KYC", icon: UnlockKeyhole },
   { id: "merchants", label: "ร้านค้า", icon: Store }, { id: "catalog", label: "สินค้า & AI", icon: PackageSearch }, { id: "agents", label: "ตัวแทน", icon: Users },
   { id: "memberships", label: "สมาชิก", icon: CircleDollarSign },
   { id: "reports", label: "รายงาน", icon: BarChart3 },
@@ -217,6 +226,9 @@ export default function AdminPage() {
   const [dateTo, setDateTo] = useState(() => inputDate());
   const [aiFocus, setAiFocus] = useState<AiFocus>("overview");
   const [selectedMerchantId, setSelectedMerchantId] = useState("");
+  const [kycEditData, setKycEditData] = useState<KycEditOverview | null>(null);
+  const [kycEditLoading, setKycEditLoading] = useState(false);
+  const [kycEditNotes, setKycEditNotes] = useState<Record<string, string>>({});
   const previousAlertCountRef = useRef<number | null>(null);
 
   const loadData = useCallback(async (silent = false) => {
@@ -250,6 +262,22 @@ export default function AdminPage() {
       setLoading(false); setRefreshing(false);
     }
   }, [dateFrom, dateTo]);
+
+  const loadKycEdit = useCallback(async () => {
+    setKycEditLoading(true);
+    try {
+      const response = await fetch("/api/admin/kyc-edit", { cache: "no-store" });
+      if (response.status === 401) { window.location.replace("/admin/login"); return; }
+      const payload = await response.json() as KycEditOverview & { error?: string };
+      if (!response.ok) throw new Error(payload.error || "โหลดสิทธิ์แก้ไข KYC ไม่สำเร็จ");
+      setKycEditData(payload);
+      setKycEditNotes(Object.fromEntries((payload.merchants ?? []).map((merchant) => [merchant.id, merchant.permissionNote ?? ""])));
+    } catch (reason) {
+      setNotice(reason instanceof Error ? reason.message : "โหลดสิทธิ์แก้ไข KYC ไม่สำเร็จ");
+    } finally {
+      setKycEditLoading(false);
+    }
+  }, []);
 
   const refreshCatalog = useCallback(async (notifyNewAlerts = false) => {
     const response = await fetch("/api/admin/catalog", { cache: "no-store" });
@@ -288,12 +316,20 @@ export default function AdminPage() {
     };
   }, [refreshCatalog]);
 
+  useEffect(() => {
+    if (tab === "kyc-edit" && !kycEditData && !kycEditLoading) void loadKycEdit();
+  }, [tab, kycEditData, kycEditLoading, loadKycEdit]);
+
   const filteredMerchants = useMemo(() => {
     if (!data) return [];
     const term = search.trim().toLocaleLowerCase("th-TH");
     return data.merchants.filter((merchant) => !term || `${merchant.name} ${merchant.phone} ${merchant.applicationNumber} ${merchant.agentCode ?? ""} ${merchant.businessDescription}`.toLocaleLowerCase("th-TH").includes(term));
   }, [data, search]);
   const pendingMerchants = useMemo(() => filteredMerchants.filter((merchant) => merchant.kycStatus === "pending"), [filteredMerchants]);
+  const filteredKycEditMerchants = useMemo(() => {
+    const term = search.trim().toLocaleLowerCase("th-TH");
+    return (kycEditData?.merchants ?? []).filter((merchant) => !term || `${merchant.name} ${merchant.phone} ${merchant.applicationNumber} ${merchant.businessDescription} ${merchant.address}`.toLocaleLowerCase("th-TH").includes(term));
+  }, [kycEditData, search]);
   const filteredMemberships = useMemo(() => {
     const term = search.trim().toLocaleLowerCase("th-TH");
     return memberships?.merchants.filter((merchant) => !term || `${merchant.name} ${merchant.phone} ${merchant.applicationNumber} ${merchant.businessDescription}`.toLocaleLowerCase("th-TH").includes(term)) ?? [];
@@ -316,6 +352,32 @@ export default function AdminPage() {
     const today = inputDate();
     setDateTo(today);
     setDateFrom(range === "today" ? today : range === "7days" ? shiftDate(today, -6) : `${today.slice(0, 8)}01`);
+  };
+
+  const updateKycEditPermission = async (merchant: KycEditMerchant, action: "allow" | "revoke") => {
+    const message = action === "allow"
+      ? `อนุญาตให้ ${merchant.name} แก้ไขและส่ง KYC ใหม่ใช่หรือไม่?`
+      : `ยกเลิกสิทธิ์แก้ไข KYC ของ ${merchant.name} ใช่หรือไม่?`;
+    if (!window.confirm(message)) return;
+    setWorkingId(`kyc-edit-${merchant.id}`);
+    setNotice("");
+    try {
+      const response = await fetch("/api/admin/kyc-edit", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ merchantId: merchant.id, action, note: kycEditNotes[merchant.id] ?? "" }),
+      });
+      const payload = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(payload.error || "อัปเดตสิทธิ์แก้ไข KYC ไม่สำเร็จ");
+      setNotice(action === "allow"
+        ? `อนุญาตให้ ${merchant.name} แก้ไขและส่ง KYC ใหม่แล้ว`
+        : `ยกเลิกสิทธิ์แก้ไข KYC ของ ${merchant.name} แล้ว`);
+      await loadKycEdit();
+    } catch (reason) {
+      setNotice(reason instanceof Error ? reason.message : "อัปเดตสิทธิ์แก้ไข KYC ไม่สำเร็จ");
+    } finally {
+      setWorkingId("");
+    }
   };
 
   const merchantAction = async (merchant: Merchant, action: string) => {
@@ -439,7 +501,7 @@ export default function AdminPage() {
     <div className="admin-app">
       <aside className={menuOpen ? "open" : ""}>
         <header><span><ShieldCheck /></span><div><small>CHATPOS</small><strong>BACKOFFICE</strong></div><button onClick={() => setMenuOpen(false)}><X /></button></header>
-        <nav>{tabs.map((item) => { const Icon = item.icon; const badge = item.id === "kyc" ? data.summary.pendingKyc : item.id === "catalog" ? (catalog?.summary.openAlerts ?? 0) : item.id === "memberships" ? (memberships?.summary.pastDue ?? 0) : 0; return <button key={item.id} className={tab === item.id ? "active" : ""} onClick={() => { setTab(item.id); setMenuOpen(false); }}><Icon /><span>{item.label}</span>{badge > 0 && <b>{badge}</b>}<ChevronRight /></button>; })}<button onClick={() => window.location.assign("/admin/kyc-edit")}><ClipboardCheck /><span>แก้ไข KYC</span><ChevronRight /></button></nav>
+        <nav>{tabs.map((item) => { const Icon = item.icon; const badge = item.id === "kyc" ? data.summary.pendingKyc : item.id === "kyc-edit" ? (kycEditData?.summary.allowedMerchants ?? 0) : item.id === "catalog" ? (catalog?.summary.openAlerts ?? 0) : item.id === "memberships" ? (memberships?.summary.pastDue ?? 0) : 0; return <button key={item.id} className={tab === item.id ? "active" : ""} onClick={() => { setTab(item.id); setMenuOpen(false); }}><Icon /><span>{item.label}</span>{badge > 0 && <b>{badge}</b>}<ChevronRight /></button>; })}</nav>
         <footer><button onClick={() => void logout()}><LogOut /> ออกจากระบบ</button><small>ChatPOS Control Center</small></footer>
       </aside>
       {menuOpen && <button className="admin-overlay" aria-label="ปิดเมนู" onClick={() => setMenuOpen(false)} />}
@@ -452,7 +514,7 @@ export default function AdminPage() {
           {tab === "dashboard" && <>
             <section className="admin-dashboard-title"><div><small>CHATPOS CONTROL CENTER</small><h2>ภาพรวมระบบที่ต้องรู้</h2><p>ตรวจสถานะร้านและยอดรับชำระได้จากหน้าเดียว</p></div><span><Activity /><small>ข้อมูลล่าสุด</small><strong>วันนี้</strong></span></section>
 
-            <button className="admin-kyc-edit-entry" onClick={() => window.location.assign("/admin/kyc-edit")}>
+            <button className="admin-kyc-edit-entry" onClick={() => setTab("kyc-edit")}>
               <span><ClipboardCheck /></span>
               <div><small>KYC CONTROL</small><strong>แก้ไข KYC รายร้าน</strong><p>ค้นหาร้านทั้งหมด แล้วอนุญาตให้แก้ไขหรือส่ง KYC ใหม่เป็นรายร้าน</p></div>
               <ChevronRight />
@@ -505,6 +567,41 @@ export default function AdminPage() {
           </>}
 
           {tab === "kyc" && <><section className="admin-page-intro"><div><small>ขั้นตอนบังคับ</small><h2>ตรวจ KYC และผูกตัวแทน</h2><p>ร้านจะอนุมัติไม่ได้จนกว่าจะเลือกตัวแทนจากเบอร์มือถือหรือรหัสตัวแทน</p></div><span><ShieldCheck /></span></section><section className="admin-card-grid wide">{pendingMerchants.map((merchant) => <MerchantCard key={merchant.id} merchant={merchant} />)}{!pendingMerchants.length && <div className="admin-empty"><BadgeCheck /><strong>ตรวจ KYC ครบแล้ว</strong><small>ยังไม่มีใบสมัครที่รอดำเนินการ</small></div>}</section></>}
+
+          {tab === "kyc-edit" && <>
+            <section className="admin-page-intro">
+              <div><small>KYC EDIT PERMISSION</small><h2>อนุญาตแก้ไข KYC เป็นรายร้าน</h2><p>ค้นหาร้านจากชื่อ เบอร์มือถือ หรือเลขใบสมัคร แล้วเปิดสิทธิ์ให้ร้านแก้ไขหรือส่ง KYC ใหม่เฉพาะร้านที่อนุญาต</p></div>
+              <button className="admin-primary" disabled={kycEditLoading} onClick={() => void loadKycEdit()}><RefreshCw /> {kycEditLoading ? "กำลังโหลด..." : "โหลดข้อมูลล่าสุด"}</button>
+            </section>
+            <section className="kyc-edit-kpis">
+              <article><Store /><span><small>ร้านทั้งหมด</small><strong>{number.format(kycEditData?.summary.totalMerchants ?? 0)}</strong></span></article>
+              <article className="allowed"><UnlockKeyhole /><span><small>กำลังเปิดสิทธิ์</small><strong>{number.format(kycEditData?.summary.allowedMerchants ?? 0)}</strong></span></article>
+              <article><Search /><span><small>ผลการค้นหา</small><strong>{number.format(filteredKycEditMerchants.length)}</strong></span></article>
+            </section>
+            {kycEditLoading && !kycEditData ? <div className="admin-empty"><RefreshCw /><strong>กำลังโหลดข้อมูลร้าน...</strong></div> :
+              <section className="kyc-edit-list">
+                {filteredKycEditMerchants.map((merchant) => <article key={merchant.id} className={merchant.editAllowed ? "edit-open" : ""}>
+                  <header>
+                    <span className="store-icon"><Store /></span>
+                    <div><small>{merchant.applicationNumber}</small><h3>{merchant.name || "ไม่ระบุชื่อร้าน"}</h3><p>{merchant.phone}</p></div>
+                    <div className="status-stack"><b className={merchant.kycStatus}>{statusLabel(merchant.kycStatus)}</b><em>{merchant.accountStatus === "approved" ? "ร้านใช้งานอยู่" : merchant.accountStatus}</em></div>
+                  </header>
+                  <div className="kyc-edit-merchant-summary">
+                    <span><small>ข้อมูลร้าน</small><strong>{merchant.businessDescription || "ยังไม่มีรายละเอียด"}</strong></span>
+                    <span><small>ที่อยู่</small><strong>{merchant.address || "ยังไม่มีที่อยู่"}</strong></span>
+                    <span><small>สิทธิ์แก้ไข KYC</small><strong className={merchant.editAllowed ? "permission-open" : "permission-closed"}>{merchant.editAllowed ? <><UnlockKeyhole /> อนุญาตแล้ว</> : <><LockKeyhole /> ยังไม่อนุญาต</>}</strong></span>
+                  </div>
+                  {merchant.editAllowed && <div className="kyc-edit-active-permission"><BadgeCheck /><div><strong>ร้านนี้สามารถแก้ไขและส่ง KYC ใหม่ได้</strong><small>{merchant.allowedAt ? `อนุญาตเมื่อ ${dateTime.format(new Date(merchant.allowedAt))}` : "เปิดสิทธิ์แล้ว"}{merchant.allowedBy ? ` · โดย ${merchant.allowedBy}` : ""}</small></div></div>}
+                  <label className="kyc-edit-note"><span>หมายเหตุ</span><input value={kycEditNotes[merchant.id] ?? ""} onChange={(event) => setKycEditNotes((current) => ({ ...current, [merchant.id]: event.target.value }))} placeholder="เช่น เปลี่ยนรูปหน้าร้าน / แก้พิกัด / อัปเดตข้อมูล" maxLength={1000} /></label>
+                  <footer>{merchant.editAllowed
+                    ? <button type="button" className="revoke" disabled={workingId === `kyc-edit-${merchant.id}`} onClick={() => void updateKycEditPermission(merchant, "revoke")}><LockKeyhole /> {workingId === `kyc-edit-${merchant.id}` ? "กำลังบันทึก..." : "ยกเลิกสิทธิ์แก้ไข"}</button>
+                    : <button type="button" className="allow" disabled={workingId === `kyc-edit-${merchant.id}`} onClick={() => void updateKycEditPermission(merchant, "allow")}><UnlockKeyhole /> {workingId === `kyc-edit-${merchant.id}` ? "กำลังบันทึก..." : "อนุญาตแก้ไข / ส่ง KYC ใหม่"}</button>}
+                  </footer>
+                </article>)}
+                {!filteredKycEditMerchants.length && <div className="admin-empty"><ClipboardCheck /><strong>ไม่พบร้านค้า</strong><small>ลองค้นหาด้วยชื่อ เบอร์มือถือ หรือเลขใบสมัคร</small></div>}
+              </section>}
+            <div className="kyc-edit-safe-note"><ShieldCheck /><span><strong>แก้เฉพาะสิทธิ์ KYC</strong><small>ไม่แก้ Payment, Payout, Balance, Transaction หรือ Settlement</small></span></div>
+          </>}
 
           {tab === "merchants" && <><section className="admin-page-intro"><div><small>MERCHANT MANAGEMENT</small><h2>ร้านค้าทั้งหมด</h2><p>ค้นหา ดูสถานะตัวแทน และยอดใช้งานของแต่ละร้าน</p></div><span><Store /></span></section><section className="admin-card-grid wide">{filteredMerchants.map((merchant) => <MerchantCard key={merchant.id} merchant={merchant} />)}{!filteredMerchants.length && <div className="admin-empty"><Search /><strong>ไม่พบร้านค้า</strong><small>ลองค้นหาด้วยชื่อ เบอร์โทร หรือเลขใบสมัคร</small></div>}</section></>}
 
