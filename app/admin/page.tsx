@@ -101,8 +101,12 @@ function shiftDate(date: string, days: number) {
   return inputDate(value);
 }
 const tabs: Array<{ id: Tab; label: string; icon: typeof Store }> = [
-  { id: "dashboard", label: "ภาพรวม", icon: LayoutDashboard }, { id: "kyc", label: "ตรวจ KYC", icon: ClipboardCheck }, { id: "kyc-edit", label: "แก้ไข KYC", icon: UnlockKeyhole },
-  { id: "merchants", label: "ร้านค้า", icon: Store }, { id: "catalog", label: "สินค้า & AI", icon: PackageSearch }, { id: "agents", label: "ตัวแทน", icon: Users },
+  { id: "dashboard", label: "ภาพรวม", icon: LayoutDashboard },
+  { id: "merchants", label: "ร้านค้าทั้งหมด", icon: Store },
+  { id: "kyc", label: "อนุมัติร้าน / KYC", icon: ClipboardCheck },
+  { id: "kyc-edit", label: "แก้ไข KYC", icon: UnlockKeyhole },
+  { id: "catalog", label: "สินค้า & AI", icon: PackageSearch },
+  { id: "agents", label: "ตัวแทน", icon: Users },
   { id: "memberships", label: "สมาชิก", icon: CircleDollarSign },
   { id: "reports", label: "รายงาน", icon: BarChart3 },
 ];
@@ -501,7 +505,14 @@ export default function AdminPage() {
     <div className="admin-app">
       <aside className={menuOpen ? "open" : ""}>
         <header><span><ShieldCheck /></span><div><small>CHATPOS</small><strong>BACKOFFICE</strong></div><button onClick={() => setMenuOpen(false)}><X /></button></header>
-        <nav>{tabs.map((item) => { const Icon = item.icon; const badge = item.id === "kyc" ? data.summary.pendingKyc : item.id === "kyc-edit" ? (kycEditData?.summary.allowedMerchants ?? 0) : item.id === "catalog" ? (catalog?.summary.openAlerts ?? 0) : item.id === "memberships" ? (memberships?.summary.pastDue ?? 0) : 0; return <button key={item.id} className={tab === item.id ? "active" : ""} onClick={() => { setTab(item.id); setMenuOpen(false); }}><Icon /><span>{item.label}</span>{badge > 0 && <b>{badge}</b>}<ChevronRight /></button>; })}</nav>
+        <nav>
+          {tabs.filter((item) => item.id === "dashboard").map((item) => { const Icon = item.icon; return <button key={item.id} className={tab === item.id ? "active" : ""} onClick={() => { setTab(item.id); setMenuOpen(false); }}><Icon /><span>{item.label}</span><ChevronRight /></button>; })}
+          <section className="admin-nav-group">
+            <div className="admin-nav-group-title"><Store /><span>ร้านค้าและอนุมัติ</span><ChevronRight /></div>
+            {tabs.filter((item) => ["merchants", "kyc", "kyc-edit"].includes(item.id)).map((item) => { const Icon = item.icon; const badge = item.id === "kyc" ? data.summary.pendingKyc : item.id === "kyc-edit" ? (kycEditData?.summary.allowedMerchants ?? 0) : 0; return <button key={item.id} className={tab === item.id ? "active" : ""} onClick={() => { setTab(item.id); setMenuOpen(false); }}><Icon /><span>{item.label}</span>{badge > 0 && <b>{badge}</b>}<ChevronRight /></button>; })}
+          </section>
+          {tabs.filter((item) => !["dashboard", "merchants", "kyc", "kyc-edit"].includes(item.id)).map((item) => { const Icon = item.icon; const badge = item.id === "catalog" ? (catalog?.summary.openAlerts ?? 0) : item.id === "memberships" ? (memberships?.summary.pastDue ?? 0) : 0; return <button key={item.id} className={tab === item.id ? "active" : ""} onClick={() => { setTab(item.id); setMenuOpen(false); }}><Icon /><span>{item.label}</span>{badge > 0 && <b>{badge}</b>}<ChevronRight /></button>; })}
+        </nav>
         <footer><button onClick={() => void logout()}><LogOut /> ออกจากระบบ</button><small>ChatPOS Control Center</small></footer>
       </aside>
       {menuOpen && <button className="admin-overlay" aria-label="ปิดเมนู" onClick={() => setMenuOpen(false)} />}
