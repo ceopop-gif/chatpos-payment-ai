@@ -452,6 +452,12 @@ export default function AdminPage() {
           {tab === "dashboard" && <>
             <section className="admin-dashboard-title"><div><small>CHATPOS CONTROL CENTER</small><h2>ภาพรวมระบบที่ต้องรู้</h2><p>ตรวจสถานะร้านและยอดรับชำระได้จากหน้าเดียว</p></div><span><Activity /><small>ข้อมูลล่าสุด</small><strong>วันนี้</strong></span></section>
 
+            <button className="admin-kyc-edit-entry" onClick={() => window.location.assign("/admin/kyc-edit")}>
+              <span><ClipboardCheck /></span>
+              <div><small>KYC CONTROL</small><strong>แก้ไข KYC รายร้าน</strong><p>ค้นหาร้านทั้งหมด แล้วอนุญาตให้แก้ไขหรือส่ง KYC ใหม่เป็นรายร้าน</p></div>
+              <ChevronRight />
+            </button>
+
             {aiSummary && <section className="admin-ai-center">
               <header>
                 <div className="admin-ai-brand"><span><Sparkles /></span><div><small>CHATPOS AI ANALYST</small><h2>AI ช่วยสรุปหลังบ้าน</h2><p>อ่านข้อมูลจริงและชี้เรื่องสำคัญให้ผู้ดูแล</p></div></div>
