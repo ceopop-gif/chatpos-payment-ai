@@ -1,4 +1,4 @@
-import { extractSlipData, findPaymentBySlip } from "../../../../lib/stoppay";
+import { extractSlipData, findPaymentBySlip, getVerifiedStopPayIdentity } from "../../../../lib/stoppay";
 
 function normalizePaidAt(value: string) {
   const trimmed = value.trim();
@@ -10,6 +10,12 @@ function normalizePaidAt(value: string) {
 export async function POST(request: Request) {
   try {
     const form = await request.formData();
+    const identityToken = String(form.get("identityToken") ?? "");
+    const identity = await getVerifiedStopPayIdentity(identityToken);
+    if (!identity) {
+      return Response.json({ error: "กรุณายืนยันชื่อ นามสกุล และเบอร์มือถือด้วย OTP ก่อนตรวจสอบสลิป" }, { status: 401 });
+    }
+
     const manualAmount = Number(form.get("amount") ?? 0);
     const manualPaidAt = normalizePaidAt(String(form.get("paidAt") ?? ""));
     const manualReference = String(form.get("slipReference") ?? "").trim();

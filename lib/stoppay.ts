@@ -56,6 +56,19 @@ export async function ensureStopPaySchema() {
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`),
     db.prepare("CREATE INDEX IF NOT EXISTS stoppay_otp_phone_created_idx ON stoppay_otp_sessions(phone, created_at)"),
+    db.prepare(`CREATE TABLE IF NOT EXISTS stoppay_identity_sessions (
+      id TEXT PRIMARY KEY NOT NULL,
+      phone TEXT NOT NULL,
+      first_name TEXT NOT NULL,
+      last_name TEXT NOT NULL,
+      otp_id TEXT NOT NULL,
+      reference_code TEXT,
+      verified_at TEXT,
+      expires_at TEXT NOT NULL,
+      attempt_count INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`),
+    db.prepare("CREATE INDEX IF NOT EXISTS stoppay_identity_phone_created_idx ON stoppay_identity_sessions(phone, created_at)"),
     db.prepare(`CREATE TABLE IF NOT EXISTS stoppay_cases (
       id TEXT PRIMARY KEY NOT NULL,
       case_number TEXT NOT NULL UNIQUE,
@@ -96,6 +109,7 @@ export async function ensureStopPaySchema() {
   ]);
   await db.prepare("DELETE FROM stoppay_lookups WHERE expires_at <= CURRENT_TIMESTAMP").run();
   await db.prepare("DELETE FROM stoppay_otp_sessions WHERE expires_at <= CURRENT_TIMESTAMP AND verified_at IS NULL").run();
+  await db.prepare("DELETE FROM stoppay_identity_sessions WHERE expires_at <= CURRENT_TIMESTAMP AND verified_at IS NULL").run();
 }
 
 function extractResponseText(payload: any) {
@@ -262,6 +276,95 @@ function smsAuth() {
   const otcId = envValue("SMSUP_OTP_OTC_ID");
   if (!username || !password || !otcId) throw new Error("ยังไม่ได้ตั้งค่า SMS UP+ OTP");
   return { authorization: "Basic " + btoa(username + ":" + password), otcId };
+}
+
+export async function requestStopPayIdentityOtp(input: { phone: string; firstName: string; lastName: string }) {
+  await ensureStopPaySchema();
+  const phone = normalizeThaiMobile(input.phone);
+  const firstName = String(input.firstName ?? "").trim().slice(0, 80);
+  const lastName = String(input.lastName ?? "").trim().slice(0, 80);
+  if (!/^0\d{9}$/.test(phone)) throw new Error("กรุณากรอกเบอร์มือถือ 10 หลัก");
+  if (firstName.length < 2 || lastName.length < 2) throw new Error("กรุณากรอกชื่อและนามสกุล");
+
+  const db = getD1();
+  const recent = await db.prepare(
+    "SELECT COUNT(*) AS total FROM stoppay_identity_sessions WHERE phone = ? AND created_at >= datetime('now', '-10 minutes')"
+  ).bind(phone).first();
+  if (Number(recent?.total ?? 0) >= 4) throw new Error("ขอ OTP เกินกำหนด กรุณารอ 10 นาที");
+
+  const { authorization, otcId } = smsAuth();
+  const baseUrl = envValue("SMSUP_BASE_URL") || "https://pub.smsup-plus.com";
+  const response = await fetch(baseUrl + "/otp/requestOTP", {
+    method: "POST",
+    headers: { authorization, "content-type": "application/json", accept: "application/json" },
+    body: JSON.stringify({ otcId, mobile: toSmsMobile(phone), callbackData: "ChatPOS STOPPAY IDENTITY" }),
+  });
+  const payload = await response.json() as any;
+  const otpId = String(payload?.otpId ?? "");
+  if (!response.ok || !otpId) throw new Error(payload?.error?.message || "ส่ง OTP ไม่สำเร็จ");
+
+  const id = crypto.randomUUID();
+  await db.prepare(`
+    INSERT INTO stoppay_identity_sessions
+      (id, phone, first_name, last_name, otp_id, reference_code, expires_at)
+    VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+10 minutes'))
+  `).bind(id, phone, firstName, lastName, otpId, String(payload?.referenceCode ?? "") || null).run();
+
+  return { sessionId: id, referenceCode: String(payload?.referenceCode ?? "") };
+}
+
+export async function verifyStopPayIdentityOtp(input: { sessionId: string; otpCode: string }) {
+  await ensureStopPaySchema();
+  const db = getD1();
+  const session = await db.prepare(
+    "SELECT * FROM stoppay_identity_sessions WHERE id = ? AND expires_at > CURRENT_TIMESTAMP LIMIT 1"
+  ).bind(input.sessionId).first() as AnyRow | null;
+  if (!session) throw new Error("OTP หมดอายุ กรุณาขอใหม่");
+  if (session.verified_at) return { identityToken: String(session.id) };
+
+  const attempts = Number(session.attempt_count ?? 0);
+  if (attempts >= 8) throw new Error("กรอก OTP ผิดเกินกำหนด กรุณาขอรหัสใหม่");
+  await db.prepare("UPDATE stoppay_identity_sessions SET attempt_count = attempt_count + 1 WHERE id = ?").bind(input.sessionId).run();
+
+  const { authorization } = smsAuth();
+  const baseUrl = envValue("SMSUP_BASE_URL") || "https://pub.smsup-plus.com";
+  const response = await fetch(baseUrl + "/otp/verifyOTP", {
+    method: "POST",
+    headers: { authorization, "content-type": "application/json", accept: "application/json" },
+    body: JSON.stringify({ otpId: String(session.otp_id), otpCode: String(input.otpCode ?? "").trim() }),
+  });
+  const payload = await response.json() as any;
+  if (!response.ok || payload?.result !== true) {
+    throw new Error(payload?.error?.message || (payload?.isExprCode ? "OTP หมดอายุ" : "OTP ไม่ถูกต้อง"));
+  }
+
+  await db.prepare("UPDATE stoppay_identity_sessions SET verified_at = CURRENT_TIMESTAMP, expires_at = datetime('now', '+30 minutes') WHERE id = ?").bind(input.sessionId).run();
+  return { identityToken: String(session.id) };
+}
+
+export async function getVerifiedStopPayIdentity(token: string) {
+  await ensureStopPaySchema();
+  return await getD1().prepare(`
+    SELECT * FROM stoppay_identity_sessions
+    WHERE id = ? AND verified_at IS NOT NULL AND expires_at > CURRENT_TIMESTAMP
+    LIMIT 1
+  `).bind(token).first() as AnyRow | null;
+}
+
+export async function activeStopPayHoldCents(merchantId: string) {
+  try {
+    const row = await getD1().prepare(`
+      SELECT COALESCE(SUM(amount_cents), 0) AS held_cents
+      FROM stoppay_cases
+      WHERE merchant_id = ?
+        AND hold_requested_at IS NOT NULL
+        AND resolved_at IS NULL
+        AND status IN ('team_review_required', 'under_team_review', 'refund_review_requested', 'review_required')
+    `).bind(merchantId).first();
+    return Math.max(0, Number(row?.held_cents ?? 0));
+  } catch {
+    return 0;
+  }
 }
 
 export async function requestStopPayOtp(input: { lookupToken: string; phone: string; name: string }) {
