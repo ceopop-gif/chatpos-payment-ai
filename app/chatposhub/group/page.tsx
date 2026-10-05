@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import {
   ArrowLeft,
-  CheckCircle2,
   RefreshCw,
   Save,
   Search,
@@ -95,6 +94,7 @@ export default function ChatPosHubGroupPage() {
   const [searchRows, setSearchRows] = useState<SearchRow[]>([]);
   const [searchSummary, setSearchSummary] = useState<SearchPayload["summary"]>({ total: 0, eligible: 0, blocked: 0 });
   const [selectedPhones, setSelectedPhones] = useState<string[]>([]);
+  const [choiceNotice, setChoiceNotice] = useState<Record<string, string>>({});
   const [searching, setSearching] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -167,8 +167,29 @@ export default function ChatPosHubGroupPage() {
     await searchShops(groupId, searchTerm);
   };
 
-  const togglePhone = (row: SearchRow) => {
-    if (!row.eligible || saving) return;
+  const choosePhone = (row: SearchRow) => {
+    if (saving) return;
+
+    if (row.currentGroup) {
+      setSelectedPhones((current) => current.filter((phone) => phone !== row.phone));
+      setChoiceNotice((current) => ({
+        ...current,
+        [row.phone]: `เบอร์ ${row.phone} อยู่ในกลุ่ม "${row.currentGroup?.name}" แล้ว`,
+      }));
+      return;
+    }
+
+    if (!row.eligible) {
+      setSelectedPhones((current) => current.filter((phone) => phone !== row.phone));
+      setChoiceNotice((current) => ({ ...current, [row.phone]: row.reason }));
+      return;
+    }
+
+    setChoiceNotice((current) => {
+      const next = { ...current };
+      delete next[row.phone];
+      return next;
+    });
     setSelectedPhones((current) =>
       current.includes(row.phone)
         ? current.filter((phone) => phone !== row.phone)
@@ -328,8 +349,8 @@ export default function ChatPosHubGroupPage() {
               <div className="hub-card-heading">
                 <Search />
                 <span>
-                  <strong>เพิ่มเบอร์ร้านเข้ากลุ่ม</strong>
-                  <small>ค้นหา → เลือกร้าน → กดบันทึกเข้ากลุ่ม</small>
+                  <strong>เลือกเบอร์ร้านที่ไม่ต้องใช้ OTP</strong>
+                  <small>แสดงทุกเบอร์ที่ยกเลิก OTP แล้ว เลือกเบอร์ที่ต้องการเข้ากลุ่มได้ทันที</small>
                 </span>
               </div>
 
@@ -372,9 +393,9 @@ export default function ChatPosHubGroupPage() {
               </form>
 
               <div className="hub-search-summary">
-                <span><b>{searchSummary.total}</b> ร้านที่พบ</span>
-                <span className="ready"><b>{searchSummary.eligible}</b> ร้านพร้อมเพิ่ม</span>
-                <span className="blocked"><b>{searchSummary.blocked}</b> ร้านยังเพิ่มไม่ได้</span>
+                <span><b>{searchSummary.total}</b> เบอร์ไม่ใช้ OTP</span>
+                <span className="ready"><b>{searchSummary.eligible}</b> เบอร์พร้อมเข้ากลุ่ม</span>
+                <span className="blocked"><b>{searchSummary.blocked}</b> เบอร์มีเงื่อนไข</span>
               </div>
 
               {searchRows.length > 0 && (
@@ -389,8 +410,8 @@ export default function ChatPosHubGroupPage() {
               {searchRows.length === 0 ? (
                 <div className="hub-empty hub-store-empty">
                   <Search />
-                  <strong>{searching ? "กำลังค้นหา..." : "ไม่พบร้านจากคำค้นนี้"}</strong>
-                  <small>ค้นหาได้จากเบอร์มือถือ ชื่อเจ้าของร้าน หรือชื่อ/รายละเอียดร้าน</small>
+                  <strong>{searching ? "กำลังค้นหา..." : "ไม่พบเบอร์ที่ยกเลิก OTP"}</strong>
+                  <small>หน้านี้แสดงเฉพาะเบอร์ที่ระบบกำหนดว่าไม่ต้องใช้ OTP</small>
                 </div>
               ) : (
                 <div className="hub-search-results">
@@ -404,8 +425,8 @@ export default function ChatPosHubGroupPage() {
                         <button
                           type="button"
                           className="hub-select-box"
-                          disabled={!row.eligible || saving}
-                          onClick={() => togglePhone(row)}
+                          disabled={saving}
+                          onClick={() => choosePhone(row)}
                           aria-label={selected ? "ยกเลิกการเลือก" : "เลือกร้าน"}
                         >
                           <span>{selected ? "✓" : ""}</span>
@@ -421,8 +442,8 @@ export default function ChatPosHubGroupPage() {
                           <span className={row.kycStatus === "approved" && row.accountStatus === "approved" ? "ok" : "bad"}>
                             KYC {row.kycStatus === "approved" && row.accountStatus === "approved" ? "ผ่าน" : "ยังไม่ผ่าน"}
                           </span>
-                          <span className={row.otpBypass ? "ok" : "bad"}>
-                            OTP {row.otpBypass ? "ยกเลิกแล้ว" : "ยังใช้อยู่"}
+                          <span className="ok">
+                            OTP ไม่ต้องใช้
                           </span>
                         </div>
 
@@ -430,15 +451,16 @@ export default function ChatPosHubGroupPage() {
                           <small>สถานะกลุ่ม</small>
                           <strong>{row.currentGroup?.name ?? "ยังไม่อยู่ในกลุ่ม"}</strong>
                           <em className={row.eligible ? "ok" : "bad"}>{row.reason}</em>
+                          {choiceNotice[row.phone] && <p className="hub-row-choice-notice">{choiceNotice[row.phone]}</p>}
                         </div>
 
                         <button
                           type="button"
-                          className={row.eligible ? (selected ? "hub-selected-button" : "hub-choose-button") : "hub-disabled-button"}
-                          disabled={!row.eligible || saving}
-                          onClick={() => togglePhone(row)}
+                          className={row.currentGroup ? "hub-grouped-button" : row.eligible ? (selected ? "hub-selected-button" : "hub-choose-button") : "hub-disabled-button"}
+                          disabled={saving}
+                          onClick={() => choosePhone(row)}
                         >
-                          {row.eligible ? (selected ? "เลือกแล้ว" : "เลือกเข้ากลุ่ม") : "เลือกไม่ได้"}
+                          {row.currentGroup ? "ตรวจสอบกลุ่ม" : row.eligible ? (selected ? "เลือกแล้ว" : "เลือกเข้ากลุ่ม") : "ตรวจสอบ"}
                         </button>
                       </article>
                     );
@@ -450,7 +472,7 @@ export default function ChatPosHubGroupPage() {
                 <div>
                   <small>ร้านที่เลือก</small>
                   <strong>{selectedPhones.length.toLocaleString("th-TH")} ร้าน</strong>
-                  <span>{selectedPhones.length ? selectedPhones.join(", ") : "เลือกร้านจากรายการด้านบน"}</span>
+                  <span>{selectedPhones.length ? selectedPhones.join(", ") : "เลือกเบอร์ที่ยังไม่อยู่ในกลุ่มจากรายการด้านบน"}</span>
                 </div>
                 <button
                   type="button"
