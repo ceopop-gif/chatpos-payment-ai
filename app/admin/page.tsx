@@ -439,7 +439,7 @@ export default function AdminPage() {
     <div className="admin-app">
       <aside className={menuOpen ? "open" : ""}>
         <header><span><ShieldCheck /></span><div><small>CHATPOS</small><strong>BACKOFFICE</strong></div><button onClick={() => setMenuOpen(false)}><X /></button></header>
-        <nav>{tabs.map((item) => { const Icon = item.icon; const badge = item.id === "kyc" ? data.summary.pendingKyc : item.id === "catalog" ? (catalog?.summary.openAlerts ?? 0) : item.id === "memberships" ? (memberships?.summary.pastDue ?? 0) : 0; return <button key={item.id} className={tab === item.id ? "active" : ""} onClick={() => { setTab(item.id); setMenuOpen(false); }}><Icon /><span>{item.label}</span>{badge > 0 && <b>{badge}</b>}<ChevronRight /></button>; })}</nav>
+        <nav>{tabs.map((item) => { const Icon = item.icon; const badge = item.id === "kyc" ? data.summary.pendingKyc : item.id === "catalog" ? (catalog?.summary.openAlerts ?? 0) : item.id === "memberships" ? (memberships?.summary.pastDue ?? 0) : 0; return <button key={item.id} className={tab === item.id ? "active" : ""} onClick={() => { setTab(item.id); setMenuOpen(false); }}><Icon /><span>{item.label}</span>{badge > 0 && <b>{badge}</b>}<ChevronRight /></button>; })}<button onClick={() => window.location.assign("/admin/kyc-edit")}><ClipboardCheck /><span>แก้ไข KYC</span><ChevronRight /></button></nav>
         <footer><button onClick={() => void logout()}><LogOut /> ออกจากระบบ</button><small>ChatPOS Control Center</small></footer>
       </aside>
       {menuOpen && <button className="admin-overlay" aria-label="ปิดเมนู" onClick={() => setMenuOpen(false)} />}
