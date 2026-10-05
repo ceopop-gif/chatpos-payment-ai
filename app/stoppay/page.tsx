@@ -167,6 +167,10 @@ export default function StopPayPage() {
       }
       const response = await fetch("/api/stoppay/analyze", { method: "POST", body: form });
       const payload = await response.json() as AnalyzePayload;
+      if (response.status === 401) {
+        setIdentityToken("");
+        setIdentitySessionId("");
+      }
       if (!response.ok) throw new Error(payload.error || "ตรวจสลิปไม่สำเร็จ");
 
       if (payload.needsManual) {
@@ -205,6 +209,10 @@ export default function StopPayPage() {
         heldAmount?: number;
         error?: string;
       };
+      if (response.status === 401) {
+        setIdentityToken("");
+        setIdentitySessionId("");
+      }
       if (!response.ok || !payload.caseNumber) throw new Error(payload.error || "สร้าง STOPPAY ไม่สำเร็จ");
 
       setCaseResult({
