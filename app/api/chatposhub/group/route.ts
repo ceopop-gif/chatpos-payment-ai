@@ -90,6 +90,7 @@ export async function POST(request: Request) {
       action?: string;
       groupId?: string;
       phone?: string;
+      phones?: string[];
       memberId?: string;
       dailyLimit?: number;
     };
@@ -100,6 +101,47 @@ export async function POST(request: Request) {
     const group = await db.prepare("SELECT id, name, status, default_daily_limit_cents FROM chatposhub_groups WHERE id = ? AND status = 'active' LIMIT 1")
       .bind(groupId).first();
     if (!group) return Response.json({ error: "กลุ่มนี้ไม่พร้อมใช้งาน" }, { status: 404 });
+
+    if (action === "add_members") {
+      const phones = Array.from(new Set((payload.phones ?? []).map(normalizeThaiPhone).filter((phone) => /^0\d{9}$/.test(phone)))).slice(0, 100);
+      if (!phones.length) return Response.json({ error: "กรุณาเลือกร้านอย่างน้อย 1 ร้าน" }, { status: 400 });
+
+      const verified: Array<{ phone: string; merchantId: string }> = [];
+      for (const phone of phones) {
+        const lookup = await lookupHubMerchant(phone, groupId);
+        if (!lookup.found || !lookup.eligible || !lookup.merchant) {
+          return Response.json({
+            error: `${phone}: ${lookup.reason}`,
+            failedPhone: phone,
+            lookup,
+          }, { status: 409 });
+        }
+        verified.push({ phone, merchantId: lookup.merchant.id });
+      }
+
+      const limitCents = Number(group.default_daily_limit_cents ?? 5000000);
+      const statements = verified.flatMap((item) => {
+        const memberId = crypto.randomUUID();
+        return [
+          db.prepare(`INSERT INTO chatposhub_group_members
+            (id, group_id, merchant_id, phone, daily_limit_cents, added_by)
+            VALUES (?, ?, ?, ?, ?, ?)`)
+            .bind(memberId, groupId, item.merchantId, item.phone, limitCents, admin.username),
+          db.prepare(`INSERT INTO chatposhub_audit_logs
+            (id, group_id, merchant_id, phone, action, detail, actor)
+            VALUES (?, ?, ?, ?, 'member.added', ?, ?)`)
+            .bind(crypto.randomUUID(), groupId, item.merchantId, item.phone, JSON.stringify({ limitCents, source: "bulk_select" }), admin.username),
+        ];
+      });
+
+      try {
+        await db.batch(statements);
+      } catch {
+        return Response.json({ error: "มีบางเบอร์ถูกเพิ่มเข้ากลุ่มอื่นแล้ว กรุณาค้นหาใหม่ก่อนบันทึก" }, { status: 409 });
+      }
+
+      return Response.json({ added: true, count: verified.length, phones: verified.map((item) => item.phone) });
+    }
 
     if (action === "add_member") {
       const phone = normalizeThaiPhone(payload.phone);
