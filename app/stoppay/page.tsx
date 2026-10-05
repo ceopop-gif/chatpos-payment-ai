@@ -158,6 +158,7 @@ export default function StopPayPage() {
     setError("");
     try {
       const form = new FormData();
+      form.set("identityToken", identityToken);
       form.set("slip", slip);
       if (manual) {
         form.set("amount", manualAmount);
