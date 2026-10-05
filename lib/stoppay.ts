@@ -352,16 +352,19 @@ export async function getVerifiedStopPayIdentity(token: string) {
 }
 
 export async function activeStopPayHoldCents(merchantId: string) {
-  await ensureStopPaySchema();
-  const row = await getD1().prepare(`
-    SELECT COALESCE(SUM(amount_cents), 0) AS held_cents
-    FROM stoppay_cases
-    WHERE merchant_id = ?
-      AND hold_requested_at IS NOT NULL
-      AND resolved_at IS NULL
-      AND status IN ('team_review_required', 'under_team_review', 'refund_review_requested', 'review_required')
-  `).bind(merchantId).first();
-  return Math.max(0, Number(row?.held_cents ?? 0));
+  try {
+    const row = await getD1().prepare(`
+      SELECT COALESCE(SUM(amount_cents), 0) AS held_cents
+      FROM stoppay_cases
+      WHERE merchant_id = ?
+        AND hold_requested_at IS NOT NULL
+        AND resolved_at IS NULL
+        AND status IN ('team_review_required', 'under_team_review', 'refund_review_requested', 'review_required')
+    `).bind(merchantId).first();
+    return Math.max(0, Number(row?.held_cents ?? 0));
+  } catch {
+    return 0;
+  }
 }
 
 export async function requestStopPayOtp(input: { lookupToken: string; phone: string; name: string }) {
