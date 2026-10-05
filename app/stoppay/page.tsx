@@ -36,12 +36,9 @@ type AnalyzePayload = {
     amount?: number | null;
     paidAt?: string | null;
     transactionReference?: string | null;
-    bankName?: string | null;
   };
   match?: Match;
 };
-
-type Tab = "report" | "track";
 
 const money = new Intl.NumberFormat("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const thaiDateTime = new Intl.DateTimeFormat("th-TH", {
@@ -56,7 +53,16 @@ function formatDate(value: string) {
 }
 
 export default function StopPayPage() {
-  const [tab, setTab] = useState<Tab>("report");
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
+  const [phone, setPhone] = useState("");
+  const [identitySessionId, setIdentitySessionId] = useState("");
+  const [identityReference, setIdentityReference] = useState("");
+  const [identityOtp, setIdentityOtp] = useState("");
+  const [identityToken, setIdentityToken] = useState("");
+  const [sendingOtp, setSendingOtp] = useState(false);
+  const [verifyingOtp, setVerifyingOtp] = useState(false);
+
   const [slip, setSlip] = useState<File | null>(null);
   const [slipPreview, setSlipPreview] = useState("");
   const [analyzing, setAnalyzing] = useState(false);
@@ -65,60 +71,94 @@ export default function StopPayPage() {
   const [manualPaidAt, setManualPaidAt] = useState("");
   const [manualReference, setManualReference] = useState("");
   const [match, setMatch] = useState<Match | null>(null);
-  const [error, setError] = useState("");
 
-  const [name, setName] = useState("");
-  const [phone, setPhone] = useState("");
   const [reasonCode, setReasonCode] = useState("fraud");
   const [reasonDetail, setReasonDetail] = useState("");
   const [accepted, setAccepted] = useState(false);
-  const [otpSessionId, setOtpSessionId] = useState("");
-  const [otpReference, setOtpReference] = useState("");
-  const [otpCode, setOtpCode] = useState("");
-  const [otpVerifiedToken, setOtpVerifiedToken] = useState("");
-  const [sendingOtp, setSendingOtp] = useState(false);
-  const [verifyingOtp, setVerifyingOtp] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [caseResult, setCaseResult] = useState<{ caseNumber: string; deadline: string } | null>(null);
+  const [caseResult, setCaseResult] = useState<{ caseNumber: string; heldAmount: number } | null>(null);
+  const [error, setError] = useState("");
 
-  const [trackCase, setTrackCase] = useState("");
-  const [trackPhone, setTrackPhone] = useState("");
-  const [trackName, setTrackName] = useState("");
-  const [trackMessage, setTrackMessage] = useState("");
-  const [trackOtpSession, setTrackOtpSession] = useState("");
-  const [trackOtpRef, setTrackOtpRef] = useState("");
-  const [trackOtp, setTrackOtp] = useState("");
-  const [trackBusy, setTrackBusy] = useState(false);
-  const [trackDone, setTrackDone] = useState(false);
-
-  const canRequestOtp = useMemo(
-    () => Boolean(match && name.trim().length >= 2 && /^0\d{9}$/.test(phone.replace(/\D/g, "")) && reasonDetail.trim().length >= 5 && accepted),
-    [match, name, phone, reasonDetail, accepted],
+  const identityReady = useMemo(
+    () => firstName.trim().length >= 2 && lastName.trim().length >= 2 && /^0\d{9}$/.test(phone),
+    [firstName, lastName, phone],
   );
+
+  const canSubmit = Boolean(
+    identityToken &&
+    match &&
+    slip &&
+    accepted &&
+    reasonDetail.trim().length >= 5,
+  );
+
+  const requestIdentityOtp = async () => {
+    if (!identityReady) return;
+    setSendingOtp(true);
+    setError("");
+    try {
+      const response = await fetch("/api/stoppay/identity/request", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ firstName, lastName, phone }),
+      });
+      const payload = await response.json() as { sessionId?: string; referenceCode?: string; error?: string };
+      if (!response.ok || !payload.sessionId) throw new Error(payload.error || "ส่ง OTP ไม่สำเร็จ");
+      setIdentitySessionId(payload.sessionId);
+      setIdentityReference(payload.referenceCode || "");
+      setIdentityOtp("");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "ส่ง OTP ไม่สำเร็จ");
+    } finally {
+      setSendingOtp(false);
+    }
+  };
+
+  const verifyIdentityOtp = async () => {
+    if (!identitySessionId || identityOtp.length < 4) return;
+    setVerifyingOtp(true);
+    setError("");
+    try {
+      const response = await fetch("/api/stoppay/identity/verify", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ sessionId: identitySessionId, otpCode: identityOtp }),
+      });
+      const payload = await response.json() as { identityToken?: string; error?: string };
+      if (!response.ok || !payload.identityToken) throw new Error(payload.error || "OTP ไม่ถูกต้อง");
+      setIdentityToken(payload.identityToken);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "ยืนยัน OTP ไม่สำเร็จ");
+    } finally {
+      setVerifyingOtp(false);
+    }
+  };
 
   const chooseSlip = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0] ?? null;
     setSlip(file);
     setMatch(null);
-    setError("");
     setManualMode(false);
-    setOtpSessionId("");
-    setOtpVerifiedToken("");
-    setCaseResult(null);
+    setError("");
     if (slipPreview) URL.revokeObjectURL(slipPreview);
     setSlipPreview(file ? URL.createObjectURL(file) : "");
   };
 
   const analyze = async (manual = false) => {
-    if (!manual && !slip) {
+    if (!identityToken) {
+      setError("กรุณายืนยันชื่อ นามสกุล และเบอร์มือถือด้วย OTP ก่อน");
+      return;
+    }
+    if (!slip) {
       setError("กรุณาเลือกรูปสลิปก่อน");
       return;
     }
+
     setAnalyzing(true);
     setError("");
     try {
       const form = new FormData();
-      if (slip) form.set("slip", slip);
+      form.set("slip", slip);
       if (manual) {
         form.set("amount", manualAmount);
         form.set("paidAt", manualPaidAt);
@@ -127,172 +167,69 @@ export default function StopPayPage() {
       const response = await fetch("/api/stoppay/analyze", { method: "POST", body: form });
       const payload = await response.json() as AnalyzePayload;
       if (!response.ok) throw new Error(payload.error || "ตรวจสลิปไม่สำเร็จ");
+
       if (payload.needsManual) {
         setManualMode(true);
         if (payload.extracted?.amount) setManualAmount(String(payload.extracted.amount));
         if (payload.extracted?.transactionReference) setManualReference(payload.extracted.transactionReference);
         throw new Error(payload.reason || "กรุณากรอกยอดและวันเวลาจากสลิป");
       }
-      if (!payload.match) throw new Error("ไม่พบร้านที่ตรงกับรายการนี้");
+
+      if (!payload.match) throw new Error("ไม่พบรายการที่ตรงกับสลิป");
       setMatch(payload.match);
       setManualMode(false);
-      if (payload.extracted?.amount) setManualAmount(String(payload.extracted.amount));
-      if (payload.extracted?.transactionReference) setManualReference(payload.extracted.transactionReference);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "ตรวจสลิปไม่สำเร็จ");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "ตรวจสลิปไม่สำเร็จ");
     } finally {
       setAnalyzing(false);
     }
   };
 
-  const requestOtp = async () => {
-    if (!match || !canRequestOtp) return;
-    setSendingOtp(true);
-    setError("");
-    try {
-      const response = await fetch("/api/stoppay/otp/request", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ lookupToken: match.lookupToken, phone, name }),
-      });
-      const payload = await response.json() as { sessionId?: string; referenceCode?: string; error?: string };
-      if (!response.ok || !payload.sessionId) throw new Error(payload.error || "ส่ง OTP ไม่สำเร็จ");
-      setOtpSessionId(payload.sessionId);
-      setOtpReference(payload.referenceCode || "");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "ส่ง OTP ไม่สำเร็จ");
-    } finally {
-      setSendingOtp(false);
-    }
-  };
-
-  const verifyOtp = async () => {
-    if (!otpSessionId || otpCode.trim().length < 4) return;
-    setVerifyingOtp(true);
-    setError("");
-    try {
-      const response = await fetch("/api/stoppay/otp/verify", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ sessionId: otpSessionId, otpCode }),
-      });
-      const payload = await response.json() as { verificationToken?: string; error?: string };
-      if (!response.ok || !payload.verificationToken) throw new Error(payload.error || "OTP ไม่ถูกต้อง");
-      setOtpVerifiedToken(payload.verificationToken);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "ยืนยัน OTP ไม่สำเร็จ");
-    } finally {
-      setVerifyingOtp(false);
-    }
-  };
-
   const submitStopPay = async () => {
-    if (!otpVerifiedToken || !slip || !match) return;
+    if (!canSubmit || !match || !slip) return;
     setSubmitting(true);
     setError("");
     try {
       const form = new FormData();
-      form.set("verificationToken", otpVerifiedToken);
+      form.set("identityToken", identityToken);
+      form.set("lookupToken", match.lookupToken);
       form.set("reasonCode", reasonCode);
       form.set("reasonDetail", reasonDetail);
       form.set("declarationAccepted", "true");
       form.set("slip", slip);
+
       const response = await fetch("/api/stoppay/cases", { method: "POST", body: form });
       const payload = await response.json() as {
         caseNumber?: string;
-        merchantContactDeadline?: string;
+        heldAmount?: number;
         error?: string;
       };
-      if (!response.ok || !payload.caseNumber) throw new Error(payload.error || "สร้างเคส STOPPAY ไม่สำเร็จ");
-      setCaseResult({ caseNumber: payload.caseNumber, deadline: payload.merchantContactDeadline || "" });
-      setTrackCase(payload.caseNumber);
-      setTrackPhone(phone);
-      setTrackName(name);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "สร้างเคส STOPPAY ไม่สำเร็จ");
+      if (!response.ok || !payload.caseNumber) throw new Error(payload.error || "สร้าง STOPPAY ไม่สำเร็จ");
+
+      setCaseResult({
+        caseNumber: payload.caseNumber,
+        heldAmount: Number(payload.heldAmount ?? match.amount),
+      });
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "สร้าง STOPPAY ไม่สำเร็จ");
     } finally {
       setSubmitting(false);
     }
   };
 
-  const prepareTrack = async () => {
-    setTrackBusy(true);
-    setTrackMessage("");
-    setTrackDone(false);
-    try {
-      const response = await fetch("/api/stoppay/recontact/prepare", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ caseNumber: trackCase, phone: trackPhone }),
-      });
-      const payload = await response.json() as {
-        ready?: boolean;
-        lookupToken?: string;
-        waiting?: boolean;
-        contacted?: boolean;
-        merchantContactDeadline?: string;
-        message?: string;
-        error?: string;
-      };
-      if (!response.ok) throw new Error(payload.error || "ตรวจสอบเคสไม่สำเร็จ");
-      setTrackMessage(payload.message || "");
-      if (!payload.ready || !payload.lookupToken) return;
-
-      const otpResponse = await fetch("/api/stoppay/otp/request", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ lookupToken: payload.lookupToken, phone: trackPhone, name: trackName || "ผู้แจ้ง STOPPAY" }),
-      });
-      const otpPayload = await otpResponse.json() as { sessionId?: string; referenceCode?: string; error?: string };
-      if (!otpResponse.ok || !otpPayload.sessionId) throw new Error(otpPayload.error || "ส่ง OTP ไม่สำเร็จ");
-      setTrackOtpSession(otpPayload.sessionId);
-      setTrackOtpRef(otpPayload.referenceCode || "");
-    } catch (err) {
-      setTrackMessage(err instanceof Error ? err.message : "ตรวจสอบเคสไม่สำเร็จ");
-    } finally {
-      setTrackBusy(false);
-    }
-  };
-
-  const confirmTrack = async () => {
-    if (!trackOtpSession || !trackOtp) return;
-    setTrackBusy(true);
-    try {
-      const verifyResponse = await fetch("/api/stoppay/otp/verify", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ sessionId: trackOtpSession, otpCode: trackOtp }),
-      });
-      const verifyPayload = await verifyResponse.json() as { verificationToken?: string; error?: string };
-      if (!verifyResponse.ok || !verifyPayload.verificationToken) throw new Error(verifyPayload.error || "OTP ไม่ถูกต้อง");
-
-      const response = await fetch("/api/stoppay/recontact/confirm", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ caseNumber: trackCase, verificationToken: verifyPayload.verificationToken }),
-      });
-      const payload = await response.json() as { message?: string; error?: string };
-      if (!response.ok) throw new Error(payload.error || "ส่งเรื่องเข้าตรวจสอบไม่สำเร็จ");
-      setTrackDone(true);
-      setTrackMessage(payload.message || "ส่งเรื่องเข้าตรวจสอบแล้ว");
-    } catch (err) {
-      setTrackMessage(err instanceof Error ? err.message : "ดำเนินการไม่สำเร็จ");
-    } finally {
-      setTrackBusy(false);
-    }
-  };
-
   const reset = () => {
-    setSlip(null);
     if (slipPreview) URL.revokeObjectURL(slipPreview);
+    setSlip(null);
     setSlipPreview("");
     setMatch(null);
-    setError("");
     setManualMode(false);
-    setOtpSessionId("");
-    setOtpCode("");
-    setOtpVerifiedToken("");
+    setManualAmount("");
+    setManualPaidAt("");
+    setManualReference("");
+    setReasonDetail("");
+    setAccepted(false);
     setCaseResult(null);
+    setError("");
   };
 
   return (
@@ -307,23 +244,54 @@ export default function StopPayPage() {
           <div className="stoppay-hero-icon"><ShieldAlert /></div>
           <div>
             <small>PAYMENT PROTECTION</small>
-            <h1>แจ้ง STOPPAY จากสลิป</h1>
-            <p>ใช้สำหรับกรณีถูกหลอกหรือไม่ได้รับสินค้า/บริการจริง ภายใน 24 ชั่วโมงหลังชำระ</p>
+            <h1>STOPPAY แจ้งและตรวจสอบรายการ</h1>
+            <p>ยืนยันตัวตนด้วย OTP ก่อนตรวจสลิปและแจ้งหยุดยอดรายการที่มีปัญหา</p>
           </div>
         </section>
 
-        <div className="stoppay-tabs">
-          <button className={tab === "report" ? "active" : ""} onClick={() => setTab("report")}>แจ้ง STOPPAY</button>
-          <button className={tab === "track" ? "active" : ""} onClick={() => setTab("track")}>ติดตามหลัง 48 ชม.</button>
-        </div>
-
-        {tab === "report" ? (
+        {!caseResult && (
           <>
-            {!caseResult && (
+            <section className="stoppay-card">
+              <div className="stoppay-card-head">
+                <span>1</span>
+                <div><h2>ยืนยันผู้แจ้ง</h2><p>กรอกชื่อ นามสกุล และเบอร์มือถือ แล้วขอรหัส OTP ก่อนใช้งาน STOPPAY</p></div>
+              </div>
+
+              <div className="stoppay-field-row">
+                <label><span><User /> ชื่อ</span><input value={firstName} disabled={Boolean(identityToken)} onChange={(e) => setFirstName(e.target.value)} placeholder="ชื่อ" /></label>
+                <label><span><User /> นามสกุล</span><input value={lastName} disabled={Boolean(identityToken)} onChange={(e) => setLastName(e.target.value)} placeholder="นามสกุล" /></label>
+              </div>
+              <label><span><Phone /> เบอร์มือถือ</span><input inputMode="tel" value={phone} disabled={Boolean(identityToken)} onChange={(e) => setPhone(e.target.value.replace(/\D/g, "").slice(0, 10))} placeholder="08xxxxxxxx" /></label>
+
+              {!identitySessionId && !identityToken && (
+                <button className="stoppay-primary" disabled={!identityReady || sendingOtp} onClick={requestIdentityOtp}>
+                  <Phone /> {sendingOtp ? "กำลังส่ง OTP..." : "ขอรหัส OTP เพื่อแจ้งและตรวจสอบ"}
+                </button>
+              )}
+
+              {identitySessionId && !identityToken && (
+                <div className="stoppay-otp">
+                  <div><KeyRound /><span><b>กรอกรหัส OTP</b><small>{identityReference ? "Ref: " + identityReference : "ส่งรหัสไปยังเบอร์ที่ระบุแล้ว"}</small></span></div>
+                  <input inputMode="numeric" maxLength={8} value={identityOtp} onChange={(e) => setIdentityOtp(e.target.value.replace(/\D/g, ""))} placeholder="OTP" />
+                  <button className="stoppay-secondary" disabled={verifyingOtp || identityOtp.length < 4} onClick={verifyIdentityOtp}>
+                    {verifyingOtp ? "กำลังตรวจสอบ..." : "ยืนยัน OTP"}
+                  </button>
+                </div>
+              )}
+
+              {identityToken && (
+                <div className="stoppay-info green">
+                  <BadgeCheck />
+                  <span><b>ยืนยันตัวตนสำเร็จ</b><small>{firstName} {lastName} · {phone}</small></span>
+                </div>
+              )}
+            </section>
+
+            {identityToken && (
               <section className="stoppay-card">
                 <div className="stoppay-card-head">
-                  <span>1</span>
-                  <div><h2>ส่งรูปสลิป</h2><p>ระบบอ่านยอด วันเวลา และค้นหาร้านจากรายการ ChatPOS</p></div>
+                  <span>2</span>
+                  <div><h2>ส่งสลิปและค้นหาร้าน</h2><p>ระบบอ่านยอด วันเวลา และค้นหารายการรับเงินที่ตรงกันภายใน 24 ชั่วโมง</p></div>
                 </div>
 
                 <label className={"stoppay-upload " + (slipPreview ? "has-image" : "")}>
@@ -333,7 +301,7 @@ export default function StopPayPage() {
 
                 {!match && (
                   <button className="stoppay-primary" disabled={!slip || analyzing} onClick={() => analyze(false)}>
-                    {analyzing ? <><RefreshCw className="spin" /> กำลังอ่านสลิป...</> : <><Search /> ตรวจสอบสลิปและค้นหาร้าน</>}
+                    {analyzing ? <><RefreshCw className="spin" /> กำลังตรวจสอบ...</> : <><Search /> ตรวจสลิปและค้นหาร้าน</>}
                   </button>
                 )}
 
@@ -343,9 +311,7 @@ export default function StopPayPage() {
                     <label><span>ยอดเงิน (บาท)</span><input inputMode="decimal" value={manualAmount} onChange={(e) => setManualAmount(e.target.value)} placeholder="เช่น 1.00" /></label>
                     <label><span>วันและเวลาชำระ</span><input type="datetime-local" value={manualPaidAt} onChange={(e) => setManualPaidAt(e.target.value)} /></label>
                     <label><span>เลขที่รายการ (ถ้ามี)</span><input value={manualReference} onChange={(e) => setManualReference(e.target.value)} placeholder="เลขที่รายการจากสลิป" /></label>
-                    <button className="stoppay-secondary" disabled={!manualAmount || !manualPaidAt || analyzing} onClick={() => analyze(true)}>
-                      <Search /> ค้นหารายการ
-                    </button>
+                    <button className="stoppay-secondary" disabled={!manualAmount || !manualPaidAt || analyzing} onClick={() => analyze(true)}><Search /> ค้นหารายการ</button>
                   </div>
                 )}
 
@@ -363,16 +329,11 @@ export default function StopPayPage() {
               </section>
             )}
 
-            {match && !caseResult && (
+            {identityToken && match && (
               <section className="stoppay-card">
                 <div className="stoppay-card-head">
-                  <span>2</span>
-                  <div><h2>ยืนยันผู้แจ้งและเหตุการณ์</h2><p>ร้านจะได้รับชื่อ เบอร์โทร และเหตุผลเพื่อให้ติดต่อกลับ</p></div>
-                </div>
-
-                <div className="stoppay-field-row">
-                  <label><span><User /> ชื่อผู้แจ้ง</span><input value={name} onChange={(e) => setName(e.target.value)} placeholder="ชื่อ-นามสกุล" /></label>
-                  <label><span><Phone /> เบอร์มือถือ</span><input inputMode="tel" value={phone} onChange={(e) => setPhone(e.target.value.replace(/\D/g, "").slice(0, 10))} placeholder="08xxxxxxxx" /></label>
+                  <span>3</span>
+                  <div><h2>แจ้งเหตุและกด STOPPAY</h2><p>เมื่อยืนยัน ระบบจะส่งคำร้องเข้า Team และล็อกยอดรายการนี้ทันที</p></div>
                 </div>
 
                 <label className="stoppay-select-label">
@@ -380,107 +341,61 @@ export default function StopPayPage() {
                   <select value={reasonCode} onChange={(e) => setReasonCode(e.target.value)}>
                     <option value="fraud">ถูกหลอกให้โอนเงิน / สงสัยถูกโกง</option>
                     <option value="not_received">ไม่ได้รับสินค้า หรือไม่ได้รับบริการ</option>
-                    <option value="other">เหตุฉุกเฉินอื่นที่เกี่ยวกับการฉ้อโกง</option>
+                    <option value="service_not_as_agreed">สินค้า/บริการไม่ตรงตามที่ตกลงอย่างมีนัยสำคัญ</option>
+                    <option value="other">เหตุอื่นที่ต้องการให้เจ้าหน้าที่ตรวจสอบ</option>
                   </select>
                 </label>
 
                 <label className="stoppay-detail">
                   <span>อธิบายว่าเกิดอะไรขึ้น</span>
-                  <textarea value={reasonDetail} onChange={(e) => setReasonDetail(e.target.value)} rows={5} maxLength={2000} placeholder="เช่น ชำระเงินแล้ว ร้านไม่ส่งสินค้า ติดต่อไม่ได้ และมีหลักฐานการสนทนา..." />
+                  <textarea value={reasonDetail} onChange={(e) => setReasonDetail(e.target.value)} rows={5} maxLength={2000} placeholder="อธิบายเหตุการณ์และสิ่งที่ต้องการให้เจ้าหน้าที่ตรวจสอบ..." />
                 </label>
 
                 <div className="stoppay-warning">
                   <AlertTriangle />
                   <div>
-                    <b>STOPPAY ใช้เฉพาะกรณีถูกโกงจริง</b>
-                    <p>ห้ามแจ้งเท็จ ห้ามใช้กรณีรับสินค้า/บริการแล้วแต่เปลี่ยนใจ หรือใช้เพื่อหลีกเลี่ยงการชำระเงิน ข้อมูลการแจ้งจะถูกเก็บเป็นหลักฐานการตรวจสอบ</p>
+                    <b>ห้ามแจ้ง STOPPAY โดยไม่ถูกต้อง</b>
+                    <p>ห้ามใช้กรณีได้รับสินค้า/บริการแล้วแต่กลับมาแจ้งเพื่อเอาเงินคืน หรือแจ้งข้อมูลเท็จ ต้องเป็นกรณีมีเหตุอันควรเชื่อว่าถูกโกง ไม่ได้รับสินค้า/บริการ หรือมีข้อพิพาทจริงเท่านั้น</p>
                   </div>
                 </div>
 
                 <label className="stoppay-consent">
                   <input type="checkbox" checked={accepted} onChange={(e) => setAccepted(e.target.checked)} />
-                  <span>ฉันยืนยันว่าข้อมูลที่แจ้งเป็นความจริง ยังไม่ได้รับสินค้า/บริการตามที่ตกลง หรือมีเหตุเชื่อได้ว่าถูกหลอก และยินยอมให้ ChatPOS ส่งข้อมูลที่จำเป็นให้ร้าน ผู้ให้บริการชำระเงิน และหน่วยงานที่เกี่ยวข้องเพื่อการตรวจสอบ</span>
+                  <span>ข้าพเจ้ายืนยันว่าข้อมูลทั้งหมดเป็นความจริง ยินยอมให้ ChatPOS เก็บข้อมูลคำร้องและส่งข้อมูลที่จำเป็นให้เจ้าหน้าที่ Team ตรวจสอบ หากตรวจพบว่าแจ้งเท็จหรือใช้ STOPPAY โดยไม่สุจริต ยินยอมให้ยกเลิกคำร้องและดำเนินการตามเงื่อนไขของระบบ</span>
                 </label>
 
-                {!otpSessionId && (
-                  <button className="stoppay-primary" disabled={!canRequestOtp || sendingOtp} onClick={requestOtp}>
-                    <Phone /> {sendingOtp ? "กำลังส่ง OTP..." : "ส่ง OTP เพื่อยืนยันเบอร์"}
-                  </button>
-                )}
+                <div className="stoppay-info amber">
+                  <Clock3 />
+                  <span><b>เมื่อกด STOPPAY ยอดนี้จะถูกล็อกทันที</b><small>เมื่อครบ 24 ชั่วโมง ยอดนี้จะยังไม่เข้าสู่ยอดพร้อมถอน จนกว่าเจ้าหน้าที่ Team จะยกเลิก STOPPAY</small></span>
+                </div>
 
-                {otpSessionId && !otpVerifiedToken && (
-                  <div className="stoppay-otp">
-                    <div><KeyRound /><span><b>กรอกรหัส OTP</b><small>{otpReference ? "Ref: " + otpReference : "ส่งรหัสไปยังเบอร์ที่ระบุแล้ว"}</small></span></div>
-                    <input inputMode="numeric" maxLength={8} value={otpCode} onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, ""))} placeholder="OTP" />
-                    <button className="stoppay-secondary" disabled={verifyingOtp || otpCode.length < 4} onClick={verifyOtp}>{verifyingOtp ? "กำลังตรวจสอบ..." : "ยืนยัน OTP"}</button>
-                  </div>
-                )}
-
-                {otpVerifiedToken && (
-                  <div className="stoppay-final">
-                    <div className="stoppay-info green"><BadgeCheck /><span><b>ยืนยันเบอร์มือถือสำเร็จ</b><small>ตรวจข้อมูลอีกครั้งก่อนกด STOPPAY</small></span></div>
-                    <button className="stoppay-danger" disabled={submitting} onClick={submitStopPay}>
-                      <ShieldAlert /> {submitting ? "กำลังส่ง STOPPAY..." : "STOPPAY รายการนี้"}
-                    </button>
-                  </div>
-                )}
-              </section>
-            )}
-
-            {caseResult && (
-              <section className="stoppay-card stoppay-success">
-                <div className="stoppay-success-icon"><FileCheck2 /></div>
-                <small>STOPPAY RECEIVED</small>
-                <h2>รับเรื่องเรียบร้อย</h2>
-                <p>ระบบแจ้งร้านให้ติดต่อผู้แจ้งตามเบอร์ที่ยืนยันไว้ ภายใน 48 ชั่วโมง</p>
-                <div className="stoppay-case-number"><span>เลขเคส</span><b>{caseResult.caseNumber}</b></div>
-                {caseResult.deadline && <div className="stoppay-info amber"><Clock3 /><span><b>กำหนดให้ร้านติดต่อภายใน</b><small>{formatDate(caseResult.deadline + (caseResult.deadline.includes("T") ? "" : "Z"))}</small></span></div>}
-                <div className="stoppay-info blue"><ShieldAlert /><span><b>ถ้าร้านไม่ติดต่อภายใน 48 ชั่วโมง</b><small>กลับมาที่ “ติดตามหลัง 48 ชม.” ยืนยัน OTP อีกครั้ง เพื่อส่งคำขอคืนเงินเข้าตรวจสอบ ระบบจะระงับการถอนของร้านระหว่างตรวจสอบ</small></span></div>
-                <button className="stoppay-primary" onClick={() => setTab("track")}>ติดตามเคสนี้</button>
-                <button className="stoppay-link" onClick={reset}>แจ้งรายการอื่น</button>
-              </section>
-            )}
-
-            {error && <div className="stoppay-error"><AlertTriangle /> <span>{error}</span></div>}
-          </>
-        ) : (
-          <section className="stoppay-card">
-            <div className="stoppay-card-head">
-              <span><Clock3 /></span>
-              <div><h2>ติดตามหลัง 48 ชั่วโมง</h2><p>กรณีร้านยังไม่ติดต่อ ให้ยืนยันตัวตนอีกครั้งก่อนส่งคำขอคืนเงินเข้าตรวจสอบ</p></div>
-            </div>
-
-            <div className="stoppay-field-row">
-              <label><span>เลขเคส STOPPAY</span><input value={trackCase} onChange={(e) => setTrackCase(e.target.value.toUpperCase())} placeholder="SP-20261005-XXXXXXXX" /></label>
-              <label><span>เบอร์มือถือผู้แจ้ง</span><input inputMode="tel" value={trackPhone} onChange={(e) => setTrackPhone(e.target.value.replace(/\D/g, "").slice(0, 10))} placeholder="08xxxxxxxx" /></label>
-            </div>
-            <label><span>ชื่อผู้แจ้ง</span><input value={trackName} onChange={(e) => setTrackName(e.target.value)} placeholder="ชื่อ-นามสกุล" /></label>
-
-            {!trackOtpSession && (
-              <button className="stoppay-primary" disabled={trackBusy || !trackCase || trackPhone.length !== 10 || trackName.trim().length < 2} onClick={prepareTrack}>
-                <Search /> {trackBusy ? "กำลังตรวจสอบ..." : "ตรวจสอบสถานะเคส"}
-              </button>
-            )}
-
-            {trackOtpSession && !trackDone && (
-              <div className="stoppay-otp">
-                <div><KeyRound /><span><b>ยืนยัน OTP อีกครั้ง</b><small>{trackOtpRef ? "Ref: " + trackOtpRef : "เพื่อยืนยันว่าเป็นเจ้าของเคส"}</small></span></div>
-                <input inputMode="numeric" value={trackOtp} onChange={(e) => setTrackOtp(e.target.value.replace(/\D/g, ""))} placeholder="OTP" />
-                <button className="stoppay-danger" disabled={trackBusy || trackOtp.length < 4} onClick={confirmTrack}>
-                  <ShieldAlert /> {trackBusy ? "กำลังส่งเรื่อง..." : "ยืนยันและส่งคำขอคืนเงินเข้าตรวจสอบ"}
+                <button className="stoppay-danger" disabled={!canSubmit || submitting} onClick={submitStopPay}>
+                  <ShieldAlert /> {submitting ? "กำลังส่ง STOPPAY..." : "STOPPAY รายการนี้"}
                 </button>
-              </div>
+              </section>
             )}
+          </>
+        )}
 
-            {trackMessage && <div className={"stoppay-info " + (trackDone ? "green" : "blue")}><CheckCircle2 /><span><b>{trackDone ? "ดำเนินการแล้ว" : "สถานะเคส"}</b><small>{trackMessage}</small></span></div>}
+        {caseResult && (
+          <section className="stoppay-card stoppay-success">
+            <div className="stoppay-success-icon"><FileCheck2 /></div>
+            <small>STOPPAY RECEIVED</small>
+            <h2>ส่งเรื่องให้ Team แล้ว</h2>
+            <p>ยอดรายการนี้ถูกล็อกแล้วและจะไม่เข้าสู่ยอดพร้อมถอน แม้รายการจะครบ 24 ชั่วโมง จนกว่าเจ้าหน้าที่จะตรวจสอบและยกเลิก STOPPAY</p>
+            <div className="stoppay-case-number"><span>เลขเคส</span><b>{caseResult.caseNumber}</b></div>
+            <div className="stoppay-info amber"><ShieldAlert /><span><b>ยอดที่ล็อก ฿{money.format(caseResult.heldAmount)}</b><small>สถานะ: รอเจ้าหน้าที่ Team ตรวจสอบ</small></span></div>
+            <button className="stoppay-primary" onClick={reset}>ตรวจรายการอื่น</button>
           </section>
         )}
 
+        {error && <div className="stoppay-error"><AlertTriangle /><span>{error}</span></div>}
+
         <section className="stoppay-policy">
           <h3>หลักการ STOPPAY</h3>
-          <div><b>ภายใน 24 ชม.</b><span>รับแจ้งเฉพาะรายการล่าสุด เพื่อให้ตรวจสอบได้ทันเวลา</span></div>
-          <div><b>ร้านมี 48 ชม.</b><span>ร้านได้รับข้อมูลผู้แจ้งเพื่อโทรติดต่อและชี้แจง</span></div>
-          <div><b>ไม่ใช่ปุ่มคืนเงินทันที</b><span>กรณีครบ 48 ชั่วโมงโดยไม่ติดต่อ ระบบจะระงับการถอนและส่งเรื่องคืนเงินเข้าตรวจสอบเมื่อผู้จ่ายกลับมายืนยันอีกครั้ง</span></div>
+          <div><b>ยืนยัน OTP ก่อน</b><span>ผู้แจ้งต้องกรอกชื่อ นามสกุล และเบอร์มือถือเพื่อยืนยันตัวตนก่อนตรวจสอบ</span></div>
+          <div><b>ภายใน 24 ชม.</b><span>ระบบค้นหารายการล่าสุดและล็อกยอดที่แจ้ง ไม่ให้กลายเป็นยอดพร้อมถอน</span></div>
+          <div><b>Team เป็นผู้ปลด</b><span>ยอดจะถูกล็อกจนกว่าเจ้าหน้าที่ Team จะตรวจสอบและกดยกเลิก STOPPAY</span></div>
         </section>
       </main>
     </div>
