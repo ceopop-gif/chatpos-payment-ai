@@ -90,6 +90,8 @@ async function settlePendingCharges(db: Database, merchantId: string) {
     "SELECT available_balance_cents FROM merchant_financial_accounts WHERE merchant_id = ? LIMIT 1"
   ).bind(merchantId).first<{ available_balance_cents: number }>();
   let balance = Number(account?.available_balance_cents ?? 0);
+  const heldStopPayCents = await activeStopPayHoldCents(merchantId);
+  let spendableBalance = Math.max(0, balance - heldStopPayCents);
   const pending = await db.prepare(`
     SELECT id, amount_cents FROM membership_charge_ledger
     WHERE merchant_id = ? AND status = 'pending'
@@ -100,7 +102,8 @@ async function settlePendingCharges(db: Database, merchantId: string) {
   let serviceFeesPaid = 0;
   for (const charge of pending.results) {
     const amount = Number(charge.amount_cents);
-    if (balance < amount) break;
+    if (spendableBalance < amount) break;
+    spendableBalance -= amount;
     balance -= amount;
     serviceFeesPaid += amount;
     paidIds.push(String(charge.id));
