@@ -600,6 +600,7 @@ export default function HomePage() {
   const [tableQrPreview, setTableQrPreview] = useState<string | null>(null);
   const [tableQrGenerating, setTableQrGenerating] = useState(false);
   const [tableOrders, setTableOrders] = useState<TableOrder[]>([]);
+  const [stopPayCases, setStopPayCases] = useState<Array<{ caseNumber: string; status: string; amount: number; reporterName: string; reporterPhone: string }>>([]);
   const [ordersLoading, setOrdersLoading] = useState(false);
   const [paymentContext, setPaymentContext] = useState("รับชำระทั่วไป");
   const [withdrawText, setWithdrawText] = useState("");
@@ -633,6 +634,7 @@ export default function HomePage() {
   const menuSyncReadyRef = useRef(false);
   const menuSyncTimerRef = useRef<number | null>(null);
   const knownOrderIdsRef = useRef<Set<string> | null>(null);
+  const knownStopPayCaseRef = useRef<Set<string> | null>(null);
   const pendingOrderSoundRef = useRef(false);
   const notificationVisualTimerRef = useRef<number | null>(null);
 
@@ -734,6 +736,8 @@ export default function HomePage() {
   }, [tableSearch, tables]);
   const activeTableOrders = useMemo(() => tableOrders.filter((order) => order.status !== "done"), [tableOrders]);
   const pendingNewOrderCount = useMemo(() => tableOrders.filter((order) => order.status === "new").length, [tableOrders]);
+  const stopPayActiveCount = stopPayCases.length;
+  const totalNotificationCount = pendingNewOrderCount + stopPayActiveCount;
 
   const ensureNotificationAudio = async () => {
     if (typeof window === "undefined") return null;
@@ -1005,6 +1009,48 @@ export default function HomePage() {
   }, []);
 
   useEffect(() => {
+    let active = true;
+    let refreshing = false;
+    const refreshStopPay = async () => {
+      if (refreshing) return;
+      refreshing = true;
+      try {
+        const response = await fetch("/api/stoppay/merchant", { cache: "no-store" });
+        if (!response.ok) return;
+        const payload = await response.json() as { cases?: Array<{ caseNumber: string; status: string; amount: number; reporterName: string; reporterPhone: string }> };
+        if (!active || !payload.cases) return;
+        const nextCases = payload.cases;
+        const known = knownStopPayCaseRef.current;
+        const incoming = known === null
+          ? nextCases
+          : nextCases.filter((item) => !known.has(item.caseNumber));
+        knownStopPayCaseRef.current = new Set(nextCases.map((item) => item.caseNumber));
+        setStopPayCases(nextCases);
+        if (incoming.length) {
+          setNotificationAlerting(true);
+          void playOrderAlertTone(Math.min(2, incoming.length));
+          toast.error("มีแจ้ง STOPPAY ใหม่ " + incoming.length + " รายการ", {
+            description: incoming[0]?.reporterName ? "ผู้แจ้ง: " + incoming[0].reporterName : "กรุณาติดต่อผู้แจ้งภายใน 48 ชั่วโมง",
+          });
+        }
+      } finally {
+        refreshing = false;
+      }
+    };
+    void refreshStopPay();
+    const timer = window.setInterval(() => void refreshStopPay(), 5000);
+    const refreshWhenVisible = () => { if (document.visibilityState === "visible") void refreshStopPay(); };
+    window.addEventListener("focus", refreshWhenVisible);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+      window.removeEventListener("focus", refreshWhenVisible);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+    };
+  }, []);
+
+  useEffect(() => {
     if (view !== "tables" && view !== "orders") return;
     let active = true;
     const refreshTables = async () => {
@@ -1029,10 +1075,10 @@ export default function HomePage() {
   }, []);
 
   useEffect(() => {
-    document.title = pendingNewOrderCount > 0
-      ? `(${pendingNewOrderCount}) ออเดอร์ใหม่ | ChatPOS`
+    document.title = totalNotificationCount > 0
+      ? "(" + totalNotificationCount + ") แจ้งเตือน | ChatPOS"
       : "ChatPOS Merchant Payment System";
-  }, [pendingNewOrderCount]);
+  }, [totalNotificationCount]);
 
   useEffect(() => {
     const inLine = isLineEnvironment();
@@ -1508,6 +1554,10 @@ export default function HomePage() {
   const openOrderNotifications = () => {
     setNotificationAlerting(false);
     void ensureNotificationAudio();
+    if (stopPayActiveCount > 0) {
+      window.location.href = "/stoppay/merchant";
+      return;
+    }
     go("orders");
   };
 
@@ -1874,7 +1924,7 @@ export default function HomePage() {
     <Header
       title={title}
       onBack={onBack}
-      notificationCount={pendingNewOrderCount}
+      notificationCount={totalNotificationCount}
       notificationAlerting={notificationAlerting}
       notificationSoundReady={notificationSoundReady}
       onNotification={openOrderNotifications}
@@ -1891,6 +1941,18 @@ export default function HomePage() {
           <span><b>พร้อมถอน</b><strong>฿{money.format(availableBalance)}</strong></span>
           <ChevronRight />
         </button>
+
+        {stopPayActiveCount > 0 && (
+          <button className="stoppay-home-alert" onClick={() => { window.location.href = "/stoppay/merchant"; }}>
+            <span><ShieldCheck /></span>
+            <div>
+              <small>STOPPAY · ต้องดำเนินการ</small>
+              <strong>มีผู้แจ้ง STOPPAY {stopPayActiveCount} รายการ</strong>
+              <p>กรุณาติดต่อผู้แจ้งภายใน 48 ชั่วโมง</p>
+            </div>
+            <ChevronRight />
+          </button>
+        )}
 
         <button className={`membership-home-card ${membershipReport?.membership.isSubscriber ? "subscriber" : "standard"}`} onClick={() => go("membership")}>
           <span><ShieldCheck /></span>
