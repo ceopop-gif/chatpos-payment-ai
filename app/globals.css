@@ -1922,3 +1922,13 @@ body { background: #071b18; }
 .membership-ledger.transactions article > em { color: #5548ba; background: #efedff; }
 .membership-empty { margin: 0; padding: 25px; color: #7a8883; text-align: center; }
 @media (min-width: 720px) { .membership-rate-grid { grid-template-columns: repeat(3,1fr); } .membership-screen { max-width: 920px; } }
+
+/* STOPPAY merchant alert */
+.stoppay-home-alert{width:100%;display:grid;grid-template-columns:48px minmax(0,1fr) 22px;align-items:center;gap:12px;margin:13px 0 16px;padding:15px;border:1px solid #efb7bd;border-radius:20px;color:#4a2025;background:linear-gradient(145deg,#fff7f7,#fff0f1);box-shadow:0 10px 24px rgba(122,27,36,.09);text-align:left;cursor:pointer}
+.stoppay-home-alert>span{width:48px;height:48px;display:grid;place-items:center;border-radius:15px;color:#fff;background:linear-gradient(145deg,#d83843,#a91320)}
+.stoppay-home-alert>span svg{width:27px}
+.stoppay-home-alert>div{min-width:0;display:flex;flex-direction:column}
+.stoppay-home-alert small{color:#b12833;font-size:10px;font-weight:900;letter-spacing:.08em}
+.stoppay-home-alert strong{margin-top:2px;color:#7c2028;font-size:17px;line-height:1.25}
+.stoppay-home-alert p{margin:4px 0 0;color:#845b60;font-size:11px;line-height:1.4}
+.stoppay-home-alert>svg{width:21px;color:#b92f39}
