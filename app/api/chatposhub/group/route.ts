@@ -38,7 +38,44 @@ export async function GET(request: Request) {
       LIMIT 30
     `).bind(groupId).all();
 
-    return Response.json({ group, members: members.results ?? [], audit: audit.results ?? [] });
+    const candidates = await db.prepare(`
+      WITH latest_approved AS (
+        SELECT
+          id, phone, first_name, last_name, business_description, kyc_status, status, created_at,
+          ROW_NUMBER() OVER (PARTITION BY phone ORDER BY created_at DESC) AS rn
+        FROM merchant_applications
+        WHERE kyc_status = 'approved' AND status = 'approved'
+      )
+      SELECT
+        a.id,
+        a.phone,
+        a.first_name,
+        a.last_name,
+        a.business_description,
+        a.kyc_status,
+        CASE WHEN b.phone IS NOT NULL THEN 1 ELSE 0 END AS otp_bypass,
+        m.group_id AS active_group_id,
+        g.name AS active_group_name
+      FROM latest_approved a
+      LEFT JOIN otp_bypass_phones b
+        ON b.phone = a.phone AND b.status = 'active'
+      LEFT JOIN chatposhub_group_members m
+        ON m.phone = a.phone AND m.status = 'active'
+      LEFT JOIN chatposhub_groups g
+        ON g.id = m.group_id AND g.status = 'active'
+      WHERE a.rn = 1
+      ORDER BY
+        CASE WHEN b.phone IS NOT NULL AND m.group_id IS NULL THEN 0 ELSE 1 END,
+        a.created_at DESC
+      LIMIT 1000
+    `).all();
+
+    return Response.json({
+      group,
+      members: members.results ?? [],
+      audit: audit.results ?? [],
+      candidates: candidates.results ?? [],
+    });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "โหลดข้อมูลกลุ่มไม่สำเร็จ" }, { status: 500 });
   }

@@ -39,10 +39,23 @@ type AuditRow = {
   created_at: string;
 };
 
+type HubCandidate = {
+  id: string;
+  phone: string;
+  first_name: string;
+  last_name: string;
+  business_description: string;
+  kyc_status: string;
+  otp_bypass: number;
+  active_group_id: string | null;
+  active_group_name: string | null;
+};
+
 type GroupPayload = {
   group: { id: string; name: string; status: string; default_daily_limit_cents: number; created_at: string };
   members: HubMember[];
   audit: AuditRow[];
+  candidates: HubCandidate[];
 };
 
 const dt = new Intl.DateTimeFormat("th-TH", { dateStyle: "short", timeStyle: "short", timeZone: "Asia/Bangkok" });
@@ -94,14 +107,15 @@ export default function ChatPosHubGroupPage() {
     else setError("ไม่พบรหัสกลุ่ม");
   }, []);
 
-  const searchMerchant = async (event?: FormEvent) => {
-    event?.preventDefault();
+  const checkMerchant = async (selectedPhone: string) => {
+    const cleanPhone = selectedPhone.replace(/\D/g, "").slice(0, 10);
+    setPhone(cleanPhone);
     setLookup(null);
     setError("");
     setSuccess("");
+    if (!cleanPhone) return;
     setLookupLoading(true);
     try {
-      const cleanPhone = phone.replace(/\D/g, "").slice(0, 10);
       const response = await fetch(`/api/chatposhub/lookup?groupId=${encodeURIComponent(groupId)}&phone=${encodeURIComponent(cleanPhone)}`, { cache: "no-store" });
       const payload = await response.json() as MerchantLookup & { error?: string };
       if (!response.ok && !payload.reason) throw new Error(payload.error || "ตรวจสอบเบอร์ไม่สำเร็จ");
@@ -111,6 +125,11 @@ export default function ChatPosHubGroupPage() {
     } finally {
       setLookupLoading(false);
     }
+  };
+
+  const searchMerchant = async (event?: FormEvent) => {
+    event?.preventDefault();
+    await checkMerchant(phone);
   };
 
   const addMerchant = async () => {
@@ -208,6 +227,14 @@ export default function ChatPosHubGroupPage() {
 
   const memberCount = data?.members.length ?? 0;
   const sortedAudit = useMemo(() => data?.audit ?? [], [data?.audit]);
+  const availableCandidates = useMemo(
+    () => (data?.candidates ?? []).filter((candidate) => Number(candidate.otp_bypass) === 1 && !candidate.active_group_id),
+    [data?.candidates],
+  );
+  const unavailableCandidates = useMemo(
+    () => (data?.candidates ?? []).filter((candidate) => Number(candidate.otp_bypass) !== 1 || Boolean(candidate.active_group_id)),
+    [data?.candidates],
+  );
 
   return (
     <div className="hub-shell">
@@ -245,13 +272,47 @@ export default function ChatPosHubGroupPage() {
             </section>
 
             <section className="hub-panel">
-              <div className="hub-card-heading"><Search /><span><strong>เพิ่มร้านเข้ากลุ่มด้วยเบอร์มือถือ</strong><small>ตรวจสอบจากฐานข้อมูล ChatPOS ก่อนทุกครั้ง</small></span></div>
-              <form className="hub-search-form" onSubmit={searchMerchant}>
-                <label><span>เบอร์มือถือร้านค้า</span><input value={phone} onChange={(event) => setPhone(event.target.value.replace(/\D/g, "").slice(0, 10))} inputMode="numeric" placeholder="กรอกเบอร์มือถือ 10 หลัก" /></label>
-                <button className="hub-primary" disabled={lookupLoading}><Search />{lookupLoading ? "กำลังตรวจ..." : "ตรวจสอบเบอร์"}</button>
-              </form>
+              <div className="hub-card-heading"><Search /><span><strong>เลือกเบอร์ร้านเพื่อเข้ากลุ่ม</strong><small>แสดงเบอร์ที่ KYC ผ่าน ยกเลิก OTP แล้ว และยังไม่อยู่ Hub กลุ่มอื่น</small></span></div>
 
-              {!lookup && <div className="hub-empty" style={{ marginTop: 14 }}>กรอกเบอร์มือถือร้านค้าเพื่อตรวจสอบและเพิ่มเข้ากลุ่ม</div>}
+              <div className="hub-phone-picker">
+                <label>
+                  <span>เลือกเบอร์ร้านที่พร้อมเพิ่ม</span>
+                  <select
+                    value={phone}
+                    onChange={(event) => void checkMerchant(event.target.value)}
+                    disabled={lookupLoading || saving || availableCandidates.length === 0}
+                  >
+                    <option value="">{availableCandidates.length ? "— เลือกเบอร์ร้าน —" : "ไม่มีเบอร์ที่พร้อมเพิ่ม"}</option>
+                    {availableCandidates.map((candidate) => (
+                      <option key={candidate.id} value={candidate.phone}>
+                        {candidate.phone} · {[candidate.first_name, candidate.last_name].filter(Boolean).join(" ") || candidate.business_description || "ร้านค้า"}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <div className="hub-phone-picker-count">
+                  <strong>{availableCandidates.length.toLocaleString("th-TH")}</strong>
+                  <span>เบอร์พร้อมเพิ่ม</span>
+                </div>
+              </div>
+
+              {availableCandidates.length === 0 && (
+                <div className="hub-empty hub-picker-empty">
+                  <strong>ยังไม่มีเบอร์ที่พร้อมเพิ่มเข้ากลุ่ม</strong>
+                  <span>เบอร์ต้องผ่าน KYC, ยกเลิก OTP แล้ว และต้องไม่อยู่ใน Hub กลุ่มอื่น</span>
+                  <a href="/bypass" className="hub-outline">ไปหน้า “ยกเลิก OTP ร้านค้า”</a>
+                </div>
+              )}
+
+              <details className="hub-manual-check">
+                <summary>ค้นหาเบอร์อื่นเพื่อตรวจสอบสถานะ</summary>
+                <form className="hub-search-form" onSubmit={searchMerchant}>
+                  <label><span>เบอร์มือถือร้านค้า</span><input value={phone} onChange={(event) => setPhone(event.target.value.replace(/\D/g, "").slice(0, 10))} inputMode="numeric" placeholder="กรอกเบอร์มือถือ 10 หลัก" /></label>
+                  <button className="hub-primary" disabled={lookupLoading}><Search />{lookupLoading ? "กำลังตรวจ..." : "ตรวจสอบเบอร์"}</button>
+                </form>
+              </details>
+
+              {!lookup && availableCandidates.length > 0 && <div className="hub-empty" style={{ marginTop: 14 }}>เลือกเบอร์จากรายการด้านบนได้เลย</div>}
 
               {lookup && (
                 <div className={`hub-lookup ${lookup.eligible ? "ok" : "bad"}`}>
@@ -270,6 +331,20 @@ export default function ChatPosHubGroupPage() {
                   <p className="hub-lookup-reason">{lookup.reason}</p>
                   {lookup.eligible && <button type="button" className="hub-primary" onClick={addMerchant} disabled={saving}><CheckCircle2 />{saving ? "กำลังบันทึก..." : "บันทึกเข้ากลุ่ม"}</button>}
                 </div>
+              )}
+
+              {unavailableCandidates.length > 0 && (
+                <details className="hub-unavailable-list">
+                  <summary>ดูเบอร์ที่ยังเพิ่มไม่ได้ ({unavailableCandidates.length.toLocaleString("th-TH")})</summary>
+                  <div>
+                    {unavailableCandidates.slice(0, 100).map((candidate) => (
+                      <button key={candidate.id} type="button" onClick={() => void checkMerchant(candidate.phone)}>
+                        <span><strong>{candidate.phone}</strong><small>{[candidate.first_name, candidate.last_name].filter(Boolean).join(" ") || candidate.business_description || "ร้านค้า"}</small></span>
+                        <em>{candidate.active_group_name ? `อยู่กลุ่ม ${candidate.active_group_name}` : Number(candidate.otp_bypass) === 1 ? "ตรวจสอบอีกครั้ง" : "ยังใช้ OTP"}</em>
+                      </button>
+                    ))}
+                  </div>
+                </details>
               )}
             </section>
 
