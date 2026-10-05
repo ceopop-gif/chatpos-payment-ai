@@ -6,7 +6,7 @@ import {
   moneyToCents,
   sha256Hex,
 } from "../../../lib/chatpos-gateway";
-import { promoteExpiredCasesForMerchant } from "../../../lib/stoppay";
+import { activeStopPayHoldCents } from "../../../lib/stoppay";
 
 type PayoutRequest = {
   clientRequestId?: string;
@@ -43,18 +43,6 @@ export async function POST(request: Request) {
     }
 
     const db = getD1();
-    await promoteExpiredCasesForMerchant(session.applicationId);
-    const stopPayHold = await db.prepare(
-      "SELECT case_number, status FROM stoppay_cases WHERE merchant_id = ? AND hold_requested_at IS NOT NULL AND resolved_at IS NULL AND status IN ('review_required','refund_review_requested') ORDER BY hold_requested_at ASC LIMIT 1"
-    ).bind(session.applicationId).first();
-    if (stopPayHold) {
-      return Response.json({
-        error: "ร้านมีเคส STOPPAY ครบกำหนด 48 ชั่วโมงและอยู่ระหว่างตรวจสอบ จึงระงับการถอนชั่วคราว",
-        code: "STOPPAY_HOLD",
-        caseNumber: String(stopPayHold.case_number),
-      }, { status: 423 });
-    }
-
     const configRow = await db.prepare(
       "SELECT * FROM chatpos_merchant_configs WHERE merchant_id = ? AND enabled = 1 LIMIT 1"
     ).bind(session.applicationId).first();
@@ -81,6 +69,42 @@ export async function POST(request: Request) {
         },
         replayed: true,
       });
+    }
+
+    const heldStopPayCents = await activeStopPayHoldCents(session.applicationId);
+    if (heldStopPayCents > 0) {
+      let gatewayWithdrawableCents: number | null = null;
+      try {
+        const balanceResult = await callChatpos(config, "/api/v1/ledger/balance", { method: "GET" });
+        const root = balanceResult.body && typeof balanceResult.body === "object"
+          ? balanceResult.body as Record<string, unknown>
+          : null;
+        const data = root?.success === true && root.data && typeof root.data === "object"
+          ? root.data as Record<string, unknown>
+          : null;
+        const withdrawable = Number(data?.withdrawableAmount);
+        if (Number.isFinite(withdrawable)) gatewayWithdrawableCents = Math.max(0, Math.round(withdrawable * 100));
+      } catch {
+        gatewayWithdrawableCents = null;
+      }
+
+      if (gatewayWithdrawableCents === null) {
+        return Response.json({
+          error: "มีรายการ STOPPAY ที่ล็อกยอดอยู่ ระบบจึงหยุดถอนชั่วคราวจนกว่าจะตรวจสอบยอดพร้อมถอนได้",
+          code: "STOPPAY_BALANCE_VERIFY_REQUIRED",
+          heldAmount: heldStopPayCents / 100,
+        }, { status: 423 });
+      }
+
+      const availableAfterHoldCents = Math.max(0, gatewayWithdrawableCents - heldStopPayCents);
+      if (amountCents > availableAfterHoldCents) {
+        return Response.json({
+          error: "ยอดถอนนี้กระทบยอดที่ถูกล็อกโดย STOPPAY กรุณาถอนเฉพาะยอดที่ไม่ถูกพัก",
+          code: "STOPPAY_AMOUNT_HELD",
+          heldAmount: heldStopPayCents / 100,
+          availableAfterHold: availableAfterHoldCents / 100,
+        }, { status: 423 });
+      }
     }
 
     const commercial = structuredClone(config.commercial) as Record<string, any>;
