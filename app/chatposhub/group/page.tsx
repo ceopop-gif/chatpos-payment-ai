@@ -1,23 +1,18 @@
 "use client";
 
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { ArrowLeft, CheckCircle2, Save, Search, Store, Trash2, Users } from "lucide-react";
+import {
+  ArrowLeft,
+  CheckCircle2,
+  RefreshCw,
+  Save,
+  Search,
+  Store,
+  Trash2,
+  Users,
+  X,
+} from "lucide-react";
 import "../hub.css";
-
-type MerchantLookup = {
-  found: boolean;
-  eligible: boolean;
-  reason: string;
-  merchant?: {
-    id: string;
-    phone: string;
-    name: string;
-    businessDescription: string;
-    kycStatus: string;
-    accountStatus: string;
-  };
-  currentGroup?: { id: string; name: string } | null;
-};
 
 type HubMember = {
   id: string;
@@ -39,101 +34,159 @@ type AuditRow = {
   created_at: string;
 };
 
-type HubCandidate = {
-  id: string;
-  phone: string;
-  first_name: string;
-  last_name: string;
-  business_description: string;
-  kyc_status: string;
-  otp_bypass: number;
-  active_group_id: string | null;
-  active_group_name: string | null;
-};
-
 type GroupPayload = {
-  group: { id: string; name: string; status: string; default_daily_limit_cents: number; created_at: string };
+  group: {
+    id: string;
+    name: string;
+    status: string;
+    default_daily_limit_cents: number;
+    created_at: string;
+  };
   members: HubMember[];
   audit: AuditRow[];
-  candidates: HubCandidate[];
 };
 
-const dt = new Intl.DateTimeFormat("th-TH", { dateStyle: "short", timeStyle: "short", timeZone: "Asia/Bangkok" });
+type SearchRow = {
+  id: string;
+  phone: string;
+  name: string;
+  businessDescription: string;
+  kycStatus: string;
+  accountStatus: string;
+  otpBypass: boolean;
+  eligible: boolean;
+  reason: string;
+  currentGroup: { id: string; name: string } | null;
+};
+
+type SearchPayload = {
+  query: string;
+  results: SearchRow[];
+  summary: { total: number; eligible: number; blocked: number };
+};
+
+const dt = new Intl.DateTimeFormat("th-TH", {
+  dateStyle: "short",
+  timeStyle: "short",
+  timeZone: "Asia/Bangkok",
+});
 
 function actionLabel(action: string) {
-  return action === "member.added" ? "เพิ่มร้านเข้ากลุ่ม"
-    : action === "member.removed" ? "นำร้านออกจากกลุ่ม"
-    : action === "member.limit_changed" ? "แก้วงเงินร้าน"
-    : action === "group.limit_changed" ? "แก้วงเงินทั้งกลุ่ม"
-    : action === "group.created" ? "สร้างกลุ่ม"
-    : action;
+  return action === "member.added"
+    ? "เพิ่มร้านเข้ากลุ่ม"
+    : action === "member.removed"
+      ? "นำร้านออกจากกลุ่ม"
+      : action === "member.limit_changed"
+        ? "แก้วงเงินร้าน"
+        : action === "group.limit_changed"
+          ? "แก้วงเงินทั้งกลุ่ม"
+          : action === "group.created"
+            ? "สร้างกลุ่ม"
+            : action;
 }
 
 export default function ChatPosHubGroupPage() {
   const [groupId, setGroupId] = useState("");
   const [data, setData] = useState<GroupPayload | null>(null);
   const [tab, setTab] = useState<"merchants" | "settings" | "api" | "history">("merchants");
-  const [phone, setPhone] = useState("");
-  const [lookup, setLookup] = useState<MerchantLookup | null>(null);
-  const [lookupLoading, setLookupLoading] = useState(false);
-  const [saving, setSaving] = useState(false);
   const [limit, setLimit] = useState("50000");
   const [memberLimitDrafts, setMemberLimitDrafts] = useState<Record<string, string>>({});
+  const [searchTerm, setSearchTerm] = useState("");
+  const [searchRows, setSearchRows] = useState<SearchRow[]>([]);
+  const [searchSummary, setSearchSummary] = useState<SearchPayload["summary"]>({ total: 0, eligible: 0, blocked: 0 });
+  const [selectedPhones, setSelectedPhones] = useState<string[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
+  const requireAdmin = (response: Response) => {
+    if (response.status !== 401) return false;
+    window.location.replace(
+      "/admin/login?returnTo=" + encodeURIComponent(window.location.pathname + window.location.search),
+    );
+    return true;
+  };
+
   const load = async (id: string) => {
     setError("");
+    const response = await fetch(
+      `/api/chatposhub/group?groupId=${encodeURIComponent(id)}`,
+      { cache: "no-store" },
+    );
+    if (requireAdmin(response)) return;
+    const payload = (await response.json()) as GroupPayload & { error?: string };
+    if (!response.ok) throw new Error(payload.error || "โหลดกลุ่มไม่สำเร็จ");
+    setData(payload);
+    setLimit(String((payload.group.default_daily_limit_cents || 0) / 100));
+    setMemberLimitDrafts(
+      Object.fromEntries(
+        payload.members.map((member) => [member.id, String(member.daily_limit_cents / 100)]),
+      ),
+    );
+  };
+
+  const searchShops = async (id: string, query: string) => {
+    setSearching(true);
+    setError("");
     try {
-      const response = await fetch(`/api/chatposhub/group?groupId=${encodeURIComponent(id)}`, { cache: "no-store" });
-      if (response.status === 401) {
-        window.location.replace("/admin/login?returnTo=" + encodeURIComponent(window.location.pathname + window.location.search));
-        return;
-      }
-      const payload = await response.json() as GroupPayload & { error?: string };
-      if (!response.ok) throw new Error(payload.error || "โหลดกลุ่มไม่สำเร็จ");
-      setData(payload);
-      setLimit(String((payload.group.default_daily_limit_cents || 0) / 100));
-      setMemberLimitDrafts(Object.fromEntries(payload.members.map((member) => [member.id, String(member.daily_limit_cents / 100)])));
+      const params = new URLSearchParams({ groupId: id, q: query.trim() });
+      const response = await fetch(`/api/chatposhub/search?${params.toString()}`, {
+        cache: "no-store",
+      });
+      if (requireAdmin(response)) return;
+      const payload = (await response.json()) as SearchPayload & { error?: string };
+      if (!response.ok) throw new Error(payload.error || "ค้นหาร้านไม่สำเร็จ");
+      setSearchRows(payload.results ?? []);
+      setSearchSummary(payload.summary ?? { total: 0, eligible: 0, blocked: 0 });
+      setSelectedPhones((current) =>
+        current.filter((phone) => (payload.results ?? []).some((row) => row.phone === phone && row.eligible)),
+      );
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "โหลดกลุ่มไม่สำเร็จ");
+      setError(reason instanceof Error ? reason.message : "ค้นหาร้านไม่สำเร็จ");
+    } finally {
+      setSearching(false);
     }
   };
 
   useEffect(() => {
     const id = new URLSearchParams(window.location.search).get("groupId") ?? "";
     setGroupId(id);
-    if (id) void load(id);
-    else setError("ไม่พบรหัสกลุ่ม");
+    if (!id) {
+      setError("ไม่พบรหัสกลุ่ม");
+      return;
+    }
+    void Promise.all([load(id), searchShops(id, "")]).catch((reason) =>
+      setError(reason instanceof Error ? reason.message : "โหลดข้อมูลไม่สำเร็จ"),
+    );
   }, []);
 
-  const checkMerchant = async (selectedPhone: string) => {
-    const cleanPhone = selectedPhone.replace(/\D/g, "").slice(0, 10);
-    setPhone(cleanPhone);
-    setLookup(null);
-    setError("");
-    setSuccess("");
-    if (!cleanPhone) return;
-    setLookupLoading(true);
-    try {
-      const response = await fetch(`/api/chatposhub/lookup?groupId=${encodeURIComponent(groupId)}&phone=${encodeURIComponent(cleanPhone)}`, { cache: "no-store" });
-      const payload = await response.json() as MerchantLookup & { error?: string };
-      if (!response.ok && !payload.reason) throw new Error(payload.error || "ตรวจสอบเบอร์ไม่สำเร็จ");
-      setLookup(payload);
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "ตรวจสอบเบอร์ไม่สำเร็จ");
-    } finally {
-      setLookupLoading(false);
-    }
+  const submitSearch = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!groupId) return;
+    await searchShops(groupId, searchTerm);
   };
 
-  const searchMerchant = async (event?: FormEvent) => {
-    event?.preventDefault();
-    await checkMerchant(phone);
+  const togglePhone = (row: SearchRow) => {
+    if (!row.eligible || saving) return;
+    setSelectedPhones((current) =>
+      current.includes(row.phone)
+        ? current.filter((phone) => phone !== row.phone)
+        : [...current, row.phone],
+    );
   };
 
-  const addMerchant = async () => {
-    if (!lookup?.eligible || !lookup.merchant) return;
+  const toggleAllEligible = () => {
+    const eligiblePhones = searchRows.filter((row) => row.eligible).map((row) => row.phone);
+    const allSelected = eligiblePhones.length > 0 && eligiblePhones.every((phone) => selectedPhones.includes(phone));
+    setSelectedPhones((current) => {
+      if (allSelected) return current.filter((phone) => !eligiblePhones.includes(phone));
+      return Array.from(new Set([...current, ...eligiblePhones]));
+    });
+  };
+
+  const saveSelected = async () => {
+    if (!selectedPhones.length || !groupId) return;
     setSaving(true);
     setError("");
     setSuccess("");
@@ -141,16 +194,19 @@ export default function ChatPosHubGroupPage() {
       const response = await fetch("/api/chatposhub/group", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action: "add_member", groupId, phone: lookup.merchant.phone }),
+        body: JSON.stringify({
+          action: "add_members",
+          groupId,
+          phones: selectedPhones,
+        }),
       });
-      const payload = await response.json() as { error?: string };
-      if (!response.ok) throw new Error(payload.error || "เพิ่มร้านไม่สำเร็จ");
-      setSuccess(`เพิ่ม ${lookup.merchant.phone} เข้ากลุ่มแล้ว`);
-      setPhone("");
-      setLookup(null);
-      await load(groupId);
+      const payload = (await response.json()) as { error?: string; count?: number };
+      if (!response.ok) throw new Error(payload.error || "บันทึกร้านเข้ากลุ่มไม่สำเร็จ");
+      setSuccess(`บันทึกเข้ากลุ่มสำเร็จ ${payload.count ?? selectedPhones.length} ร้าน`);
+      setSelectedPhones([]);
+      await Promise.all([load(groupId), searchShops(groupId, searchTerm)]);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "เพิ่มร้านไม่สำเร็จ");
+      setError(reason instanceof Error ? reason.message : "บันทึกร้านเข้ากลุ่มไม่สำเร็จ");
     } finally {
       setSaving(false);
     }
@@ -167,10 +223,10 @@ export default function ChatPosHubGroupPage() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ action: "remove_member", groupId, memberId: member.id }),
       });
-      const payload = await response.json() as { error?: string };
+      const payload = (await response.json()) as { error?: string };
       if (!response.ok) throw new Error(payload.error || "นำร้านออกไม่สำเร็จ");
-      setSuccess("นำร้านออกจากกลุ่มแล้ว เบอร์นี้สามารถเพิ่มเข้ากลุ่มอื่นได้");
-      await load(groupId);
+      setSuccess("นำร้านออกจากกลุ่มแล้ว");
+      await Promise.all([load(groupId), searchShops(groupId, searchTerm)]);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "นำร้านออกไม่สำเร็จ");
     } finally {
@@ -186,9 +242,13 @@ export default function ChatPosHubGroupPage() {
       const response = await fetch("/api/chatposhub/group", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action: "set_group_limit", groupId, dailyLimit: Number(limit) }),
+        body: JSON.stringify({
+          action: "set_group_limit",
+          groupId,
+          dailyLimit: Number(limit),
+        }),
       });
-      const payload = await response.json() as { error?: string };
+      const payload = (await response.json()) as { error?: string };
       if (!response.ok) throw new Error(payload.error || "บันทึกวงเงินไม่สำเร็จ");
       setSuccess("บันทึกวงเงินให้ทุกร้านเรียบร้อย");
       await load(groupId);
@@ -214,7 +274,7 @@ export default function ChatPosHubGroupPage() {
           dailyLimit: Number(memberLimitDrafts[member.id] ?? 0),
         }),
       });
-      const payload = await response.json() as { error?: string };
+      const payload = (await response.json()) as { error?: string };
       if (!response.ok) throw new Error(payload.error || "บันทึกวงเงินไม่สำเร็จ");
       setSuccess(`บันทึกวงเงินของ ${member.phone} แล้ว`);
       await load(groupId);
@@ -227,27 +287,29 @@ export default function ChatPosHubGroupPage() {
 
   const memberCount = data?.members.length ?? 0;
   const sortedAudit = useMemo(() => data?.audit ?? [], [data?.audit]);
-  const availableCandidates = useMemo(
-    () => (data?.candidates ?? []).filter((candidate) => Number(candidate.otp_bypass) === 1 && !candidate.active_group_id),
-    [data?.candidates],
-  );
-  const unavailableCandidates = useMemo(
-    () => (data?.candidates ?? []).filter((candidate) => Number(candidate.otp_bypass) !== 1 || Boolean(candidate.active_group_id)),
-    [data?.candidates],
-  );
+  const allEligibleSelected =
+    searchSummary.eligible > 0 &&
+    searchRows.filter((row) => row.eligible).every((row) => selectedPhones.includes(row.phone));
 
   return (
     <div className="hub-shell">
       <header className="hub-topbar">
-        <div className="hub-brand"><b>Chat<span>POS</span></b><i /><strong>Hub</strong></div>
+        <div className="hub-brand">
+          <b>Chat<span>POS</span></b><i /><strong>Hub</strong>
+        </div>
         <a href="/chatposhub" className="hub-top-link"><Users />จัดการกลุ่ม</a>
       </header>
 
       <main className="hub-group-main">
         <a href="/chatposhub" className="hub-back"><ArrowLeft />กลับหน้ารวมกลุ่ม</a>
+
         <section className="hub-title">
           <div><Store /></div>
-          <span><small>CHATPOS HUB GROUP</small><h1>{data?.group.name ?? "กำลังโหลดกลุ่ม..."}</h1><p>{memberCount.toLocaleString("th-TH")} ร้านในกลุ่ม</p></span>
+          <span>
+            <small>CHATPOS HUB GROUP</small>
+            <h1>{data?.group.name ?? "กำลังโหลดกลุ่ม..."}</h1>
+            <p>{memberCount.toLocaleString("th-TH")} ร้านในกลุ่ม</p>
+          </span>
         </section>
 
         <nav className="hub-tabs">
@@ -262,109 +324,207 @@ export default function ChatPosHubGroupPage() {
 
         {tab === "merchants" && data && (
           <>
-            <section className="hub-panel">
-              <div className="hub-card-heading"><Save /><span><strong>กำหนดวงเงินร้านเท่ากัน (บาท / วัน)</strong><small>บันทึกครั้งเดียวจะใช้กับร้านที่อยู่ในกลุ่มนี้ทั้งหมด</small></span></div>
-              <div className="hub-limit-row">
-                <label><span>วงเงินต่อร้าน</span><input value={limit} onChange={(event) => setLimit(event.target.value.replace(/[^0-9.]/g, ""))} inputMode="decimal" /></label>
-                <button className="hub-primary" onClick={saveGroupLimit} disabled={saving}><Save />บันทึกทุกร้าน</button>
+            <section className="hub-panel hub-add-store-panel">
+              <div className="hub-card-heading">
+                <Search />
+                <span>
+                  <strong>เพิ่มเบอร์ร้านเข้ากลุ่ม</strong>
+                  <small>ค้นหา → เลือกร้าน → กดบันทึกเข้ากลุ่ม</small>
+                </span>
               </div>
-              <p className="hub-help">วงเงินจริงจะถูกตรวจซ้ำฝั่งระบบ ไม่อนุญาตให้เพิ่มร้านซ้ำใน Hub หลายกลุ่มพร้อมกัน</p>
-            </section>
 
-            <section className="hub-panel">
-              <div className="hub-card-heading"><Search /><span><strong>เลือกเบอร์ร้านเพื่อเข้ากลุ่ม</strong><small>แสดงเบอร์ที่ KYC ผ่าน ยกเลิก OTP แล้ว และยังไม่อยู่ Hub กลุ่มอื่น</small></span></div>
-
-              <div className="hub-phone-picker">
+              <form className="hub-store-search" onSubmit={submitSearch}>
                 <label>
-                  <span>เลือกเบอร์ร้านที่พร้อมเพิ่ม</span>
-                  <select
-                    value={phone}
-                    onChange={(event) => void checkMerchant(event.target.value)}
-                    disabled={lookupLoading || saving || availableCandidates.length === 0}
-                  >
-                    <option value="">{availableCandidates.length ? "— เลือกเบอร์ร้าน —" : "ไม่มีเบอร์ที่พร้อมเพิ่ม"}</option>
-                    {availableCandidates.map((candidate) => (
-                      <option key={candidate.id} value={candidate.phone}>
-                        {candidate.phone} · {[candidate.first_name, candidate.last_name].filter(Boolean).join(" ") || candidate.business_description || "ร้านค้า"}
-                      </option>
-                    ))}
-                  </select>
+                  <span>ค้นหาเบอร์มือถือหรือชื่อร้าน</span>
+                  <div>
+                    <Search />
+                    <input
+                      value={searchTerm}
+                      onChange={(event) => setSearchTerm(event.target.value)}
+                      placeholder="เช่น 0812345678 หรือชื่อร้าน"
+                    />
+                    {searchTerm && (
+                      <button
+                        type="button"
+                        className="hub-search-clear"
+                        onClick={() => {
+                          setSearchTerm("");
+                          void searchShops(groupId, "");
+                        }}
+                        aria-label="ล้างการค้นหา"
+                      >
+                        <X />
+                      </button>
+                    )}
+                  </div>
                 </label>
-                <div className="hub-phone-picker-count">
-                  <strong>{availableCandidates.length.toLocaleString("th-TH")}</strong>
-                  <span>เบอร์พร้อมเพิ่ม</span>
-                </div>
+                <button className="hub-primary" disabled={searching}>
+                  <Search />{searching ? "กำลังค้นหา..." : "ค้นหา"}
+                </button>
+                <button
+                  type="button"
+                  className="hub-outline"
+                  disabled={searching}
+                  onClick={() => void searchShops(groupId, searchTerm)}
+                >
+                  <RefreshCw />รีเฟรช
+                </button>
+              </form>
+
+              <div className="hub-search-summary">
+                <span><b>{searchSummary.total}</b> ร้านที่พบ</span>
+                <span className="ready"><b>{searchSummary.eligible}</b> ร้านพร้อมเพิ่ม</span>
+                <span className="blocked"><b>{searchSummary.blocked}</b> ร้านยังเพิ่มไม่ได้</span>
               </div>
 
-              {availableCandidates.length === 0 && (
-                <div className="hub-empty hub-picker-empty">
-                  <strong>ยังไม่มีเบอร์ที่พร้อมเพิ่มเข้ากลุ่ม</strong>
-                  <span>เบอร์ต้องผ่าน KYC, ยกเลิก OTP แล้ว และต้องไม่อยู่ใน Hub กลุ่มอื่น</span>
-                  <a href="/bypass" className="hub-outline">ไปหน้า “ยกเลิก OTP ร้านค้า”</a>
+              {searchRows.length > 0 && (
+                <div className="hub-select-tools">
+                  <button type="button" className="hub-outline" onClick={toggleAllEligible}>
+                    {allEligibleSelected ? "ยกเลิกเลือกทั้งหมด" : "เลือกทั้งหมดที่เพิ่มได้"}
+                  </button>
+                  <span>เลือกแล้ว <strong>{selectedPhones.length}</strong> ร้าน</span>
                 </div>
               )}
 
-              <details className="hub-manual-check">
-                <summary>ค้นหาเบอร์อื่นเพื่อตรวจสอบสถานะ</summary>
-                <form className="hub-search-form" onSubmit={searchMerchant}>
-                  <label><span>เบอร์มือถือร้านค้า</span><input value={phone} onChange={(event) => setPhone(event.target.value.replace(/\D/g, "").slice(0, 10))} inputMode="numeric" placeholder="กรอกเบอร์มือถือ 10 หลัก" /></label>
-                  <button className="hub-primary" disabled={lookupLoading}><Search />{lookupLoading ? "กำลังตรวจ..." : "ตรวจสอบเบอร์"}</button>
-                </form>
-              </details>
+              {searchRows.length === 0 ? (
+                <div className="hub-empty hub-store-empty">
+                  <Search />
+                  <strong>{searching ? "กำลังค้นหา..." : "ไม่พบร้านจากคำค้นนี้"}</strong>
+                  <small>ค้นหาได้จากเบอร์มือถือ ชื่อเจ้าของร้าน หรือชื่อ/รายละเอียดร้าน</small>
+                </div>
+              ) : (
+                <div className="hub-search-results">
+                  {searchRows.map((row) => {
+                    const selected = selectedPhones.includes(row.phone);
+                    return (
+                      <article
+                        key={row.id}
+                        className={`${row.eligible ? "eligible" : "blocked"} ${selected ? "selected" : ""}`}
+                      >
+                        <button
+                          type="button"
+                          className="hub-select-box"
+                          disabled={!row.eligible || saving}
+                          onClick={() => togglePhone(row)}
+                          aria-label={selected ? "ยกเลิกการเลือก" : "เลือกร้าน"}
+                        >
+                          <span>{selected ? "✓" : ""}</span>
+                        </button>
 
-              {!lookup && availableCandidates.length > 0 && <div className="hub-empty" style={{ marginTop: 14 }}>เลือกเบอร์จากรายการด้านบนได้เลย</div>}
+                        <div className="hub-search-shop">
+                          <strong>{row.phone}</strong>
+                          <b>{row.name}</b>
+                          <small>{row.businessDescription || "ไม่มีรายละเอียดร้าน"}</small>
+                        </div>
 
-              {lookup && (
-                <div className={`hub-lookup ${lookup.eligible ? "ok" : "bad"}`}>
-                  <div className="hub-lookup-head">
-                    <strong>{lookup.merchant?.name || lookup.merchant?.phone || "ผลการตรวจสอบ"}</strong>
-                    <em>{lookup.eligible ? "พร้อมเพิ่ม" : "เพิ่มไม่ได้"}</em>
-                  </div>
-                  {lookup.merchant && (
-                    <div className="hub-lookup-grid">
-                      <div><small>เบอร์มือถือ</small><strong>{lookup.merchant.phone}</strong></div>
-                      <div><small>KYC</small><strong>{lookup.merchant.kycStatus === "approved" ? "ผ่าน" : lookup.merchant.kycStatus}</strong></div>
-                      <div><small>OTP</small><strong>{lookup.eligible || lookup.reason.includes("กลุ่ม") ? "ยกเลิกแล้ว" : "ยังใช้ OTP"}</strong></div>
-                      <div><small>กลุ่มปัจจุบัน</small><strong>{lookup.currentGroup?.name || "ไม่มี"}</strong></div>
-                    </div>
-                  )}
-                  <p className="hub-lookup-reason">{lookup.reason}</p>
-                  {lookup.eligible && <button type="button" className="hub-primary" onClick={addMerchant} disabled={saving}><CheckCircle2 />{saving ? "กำลังบันทึก..." : "บันทึกเข้ากลุ่ม"}</button>}
+                        <div className="hub-search-status">
+                          <span className={row.kycStatus === "approved" && row.accountStatus === "approved" ? "ok" : "bad"}>
+                            KYC {row.kycStatus === "approved" && row.accountStatus === "approved" ? "ผ่าน" : "ยังไม่ผ่าน"}
+                          </span>
+                          <span className={row.otpBypass ? "ok" : "bad"}>
+                            OTP {row.otpBypass ? "ยกเลิกแล้ว" : "ยังใช้อยู่"}
+                          </span>
+                        </div>
+
+                        <div className="hub-search-group">
+                          <small>สถานะกลุ่ม</small>
+                          <strong>{row.currentGroup?.name ?? "ยังไม่อยู่ในกลุ่ม"}</strong>
+                          <em className={row.eligible ? "ok" : "bad"}>{row.reason}</em>
+                        </div>
+
+                        <button
+                          type="button"
+                          className={row.eligible ? (selected ? "hub-selected-button" : "hub-choose-button") : "hub-disabled-button"}
+                          disabled={!row.eligible || saving}
+                          onClick={() => togglePhone(row)}
+                        >
+                          {row.eligible ? (selected ? "เลือกแล้ว" : "เลือกเข้ากลุ่ม") : "เลือกไม่ได้"}
+                        </button>
+                      </article>
+                    );
+                  })}
                 </div>
               )}
 
-              {unavailableCandidates.length > 0 && (
-                <details className="hub-unavailable-list">
-                  <summary>ดูเบอร์ที่ยังเพิ่มไม่ได้ ({unavailableCandidates.length.toLocaleString("th-TH")})</summary>
-                  <div>
-                    {unavailableCandidates.slice(0, 100).map((candidate) => (
-                      <button key={candidate.id} type="button" onClick={() => void checkMerchant(candidate.phone)}>
-                        <span><strong>{candidate.phone}</strong><small>{[candidate.first_name, candidate.last_name].filter(Boolean).join(" ") || candidate.business_description || "ร้านค้า"}</small></span>
-                        <em>{candidate.active_group_name ? `อยู่กลุ่ม ${candidate.active_group_name}` : Number(candidate.otp_bypass) === 1 ? "ตรวจสอบอีกครั้ง" : "ยังใช้ OTP"}</em>
-                      </button>
-                    ))}
-                  </div>
-                </details>
-              )}
+              <div className={`hub-save-selection ${selectedPhones.length ? "active" : ""}`}>
+                <div>
+                  <small>ร้านที่เลือก</small>
+                  <strong>{selectedPhones.length.toLocaleString("th-TH")} ร้าน</strong>
+                  <span>{selectedPhones.length ? selectedPhones.join(", ") : "เลือกร้านจากรายการด้านบน"}</span>
+                </div>
+                <button
+                  type="button"
+                  className="hub-primary"
+                  disabled={!selectedPhones.length || saving}
+                  onClick={saveSelected}
+                >
+                  <Save />{saving ? "กำลังบันทึก..." : "บันทึกเข้ากลุ่ม"}
+                </button>
+              </div>
             </section>
 
             <section className="hub-panel">
-              <div className="hub-section-head"><span><Store /><strong>ร้านในกลุ่ม</strong></span><em>{memberCount} ร้าน</em></div>
-              {memberCount === 0 ? <div className="hub-empty">ยังไม่มีร้านในกลุ่ม</div> : (
+              <div className="hub-card-heading">
+                <Save />
+                <span>
+                  <strong>กำหนดวงเงินร้านเท่ากัน (บาท / วัน)</strong>
+                  <small>บันทึกครั้งเดียวจะใช้กับร้านที่อยู่ในกลุ่มนี้ทั้งหมด</small>
+                </span>
+              </div>
+              <div className="hub-limit-row">
+                <label>
+                  <span>วงเงินต่อร้าน</span>
+                  <input
+                    value={limit}
+                    onChange={(event) => setLimit(event.target.value.replace(/[^0-9.]/g, ""))}
+                    inputMode="decimal"
+                  />
+                </label>
+                <button className="hub-primary" onClick={saveGroupLimit} disabled={saving}>
+                  <Save />บันทึกทุกร้าน
+                </button>
+              </div>
+            </section>
+
+            <section className="hub-panel">
+              <div className="hub-section-head">
+                <span><Store /><strong>ร้านในกลุ่ม</strong></span>
+                <em>{memberCount} ร้าน</em>
+              </div>
+
+              {memberCount === 0 ? (
+                <div className="hub-empty">ยังไม่มีร้านในกลุ่ม — ใช้ช่อง “เพิ่มเบอร์ร้านเข้ากลุ่ม” ด้านบน</div>
+              ) : (
                 <div className="hub-member-list">
                   {data.members.map((member) => (
                     <article className="hub-member" key={member.id}>
                       <div className="hub-member-main">
                         <strong>{[member.first_name, member.last_name].filter(Boolean).join(" ") || member.phone}</strong>
-                        <small>{member.phone} · KYC {member.kyc_status === "approved" ? "ผ่าน" : member.kyc_status}{member.business_description ? ` · ${member.business_description}` : ""}</small>
+                        <small>
+                          {member.phone} · KYC {member.kyc_status === "approved" ? "ผ่าน" : member.kyc_status}
+                          {member.business_description ? ` · ${member.business_description}` : ""}
+                        </small>
                       </div>
                       <div className="hub-member-limit">
-                        <input value={memberLimitDrafts[member.id] ?? ""} onChange={(event) => setMemberLimitDrafts((current) => ({ ...current, [member.id]: event.target.value.replace(/[^0-9.]/g, "") }))} inputMode="decimal" />
+                        <input
+                          value={memberLimitDrafts[member.id] ?? ""}
+                          onChange={(event) =>
+                            setMemberLimitDrafts((current) => ({
+                              ...current,
+                              [member.id]: event.target.value.replace(/[^0-9.]/g, ""),
+                            }))
+                          }
+                          inputMode="decimal"
+                        />
                         <span>บาท/วัน</span>
                       </div>
                       <div className="hub-member-actions">
-                        <button className="hub-outline" onClick={() => saveMemberLimit(member)} disabled={saving}><Save />บันทึก</button>
-                        <button className="hub-danger" onClick={() => removeMerchant(member)} disabled={saving}><Trash2 />ออกจากกลุ่ม</button>
+                        <button className="hub-outline" onClick={() => saveMemberLimit(member)} disabled={saving}>
+                          <Save />บันทึก
+                        </button>
+                        <button className="hub-danger" onClick={() => removeMerchant(member)} disabled={saving}>
+                          <Trash2 />ออกจากกลุ่ม
+                        </button>
                       </div>
                     </article>
                   ))}
@@ -376,8 +536,13 @@ export default function ChatPosHubGroupPage() {
 
         {tab === "history" && data && (
           <section className="hub-panel">
-            <div className="hub-section-head"><span><Users /><strong>Audit Log</strong></span><em>{sortedAudit.length} รายการล่าสุด</em></div>
-            {sortedAudit.length === 0 ? <div className="hub-empty">ยังไม่มีประวัติ</div> : (
+            <div className="hub-section-head">
+              <span><Users /><strong>Audit Log</strong></span>
+              <em>{sortedAudit.length} รายการล่าสุด</em>
+            </div>
+            {sortedAudit.length === 0 ? (
+              <div className="hub-empty">ยังไม่มีประวัติ</div>
+            ) : (
               <div className="hub-audit">
                 {sortedAudit.map((row, index) => (
                   <article key={row.created_at + row.action + index}>
@@ -391,7 +556,11 @@ export default function ChatPosHubGroupPage() {
           </section>
         )}
 
-        {(tab === "settings" || tab === "api") && <section className="hub-panel hub-placeholder">เมนูนี้คงไว้ตามโครงสร้าง Hub เดิม และไม่กระทบการเพิ่มร้านเข้ากลุ่มรอบนี้</section>}
+        {(tab === "settings" || tab === "api") && (
+          <section className="hub-panel hub-placeholder">
+            เมนูนี้คงไว้ตามโครงสร้าง Hub เดิม
+          </section>
+        )}
       </main>
     </div>
   );
