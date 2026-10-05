@@ -71,7 +71,7 @@ export async function ensureChatPosHubSchema() {
   ]);
 }
 
-async function hasOtpBypass(phone: string) {
+export async function hasOtpBypass(phone: string) {
   const db = getD1();
   const own = await db.prepare("SELECT phone FROM otp_bypass_phones WHERE phone = ? AND status = 'active' LIMIT 1").bind(phone).first();
   if (own) return true;
@@ -155,4 +155,125 @@ export async function lookupHubMerchant(phoneInput: unknown, targetGroupId = "")
   }
 
   return { found: true, eligible: true, reason: "พร้อมเพิ่มเข้ากลุ่ม", merchant: merchantResult, currentGroup: null };
+}
+
+
+export type HubMerchantSearchRow = {
+  id: string;
+  phone: string;
+  name: string;
+  businessDescription: string;
+  kycStatus: string;
+  accountStatus: string;
+  otpBypass: boolean;
+  eligible: boolean;
+  reason: string;
+  currentGroup: { id: string; name: string } | null;
+};
+
+async function activeOtpBypassPhoneSet() {
+  const db = getD1();
+  const phones = new Set<string>();
+  const queries = [
+    "SELECT phone FROM otp_bypass_phones WHERE status = 'active'",
+    "SELECT phone FROM otp_bypass WHERE status = 'active'",
+    "SELECT phone FROM bypass_phones WHERE status = 'active'",
+    "SELECT phone FROM merchant_otp_bypass WHERE status = 'active'",
+    "SELECT phone FROM otp_exemptions WHERE status = 'active'",
+  ];
+  for (const sql of queries) {
+    try {
+      const result = await db.prepare(sql).all();
+      for (const row of result.results ?? []) {
+        const phone = normalizeThaiPhone(row.phone);
+        if (/^0\d{9}$/.test(phone)) phones.add(phone);
+      }
+    } catch {
+      // Older production schemas may not contain every compatibility table.
+    }
+  }
+  return phones;
+}
+
+export async function searchHubMerchants(searchInput: unknown, targetGroupId = ""): Promise<HubMerchantSearchRow[]> {
+  await ensureChatPosHubSchema();
+  const db = getD1();
+  const query = String(searchInput ?? "").trim().replace(/\s+/g, " ").slice(0, 80);
+  const digits = query.replace(/\D/g, "").slice(0, 10);
+  const like = `%${query}%`;
+  const phoneLike = digits ? `%${digits}%` : like;
+
+  const merchants = await db.prepare(`
+    WITH latest AS (
+      SELECT
+        id, phone, first_name, last_name, business_description, kyc_status, status, created_at,
+        ROW_NUMBER() OVER (PARTITION BY phone ORDER BY created_at DESC) AS rn
+      FROM merchant_applications
+    )
+    SELECT id, phone, first_name, last_name, business_description, kyc_status, status, created_at
+    FROM latest
+    WHERE rn = 1
+      AND (
+        ? = ''
+        OR phone LIKE ?
+        OR first_name LIKE ?
+        OR last_name LIKE ?
+        OR (first_name || ' ' || last_name) LIKE ?
+        OR business_description LIKE ?
+      )
+    ORDER BY created_at DESC
+    LIMIT 100
+  `).bind(query, phoneLike, like, like, like, like).all();
+
+  const activeGroups = await db.prepare(`
+    SELECT m.phone, m.group_id, g.name
+    FROM chatposhub_group_members m
+    JOIN chatposhub_groups g ON g.id = m.group_id
+    WHERE m.status = 'active' AND g.status = 'active'
+  `).all();
+  const groupByPhone = new Map<string, { id: string; name: string }>();
+  for (const row of activeGroups.results ?? []) {
+    const phone = normalizeThaiPhone(row.phone);
+    if (/^0\d{9}$/.test(phone)) {
+      groupByPhone.set(phone, { id: String(row.group_id), name: String(row.name) });
+    }
+  }
+
+  const bypassPhones = await activeOtpBypassPhoneSet();
+  return (merchants.results ?? []).map((merchant) => {
+    const phone = normalizeThaiPhone(merchant.phone);
+    const kycStatus = String(merchant.kyc_status ?? "");
+    const accountStatus = String(merchant.status ?? "");
+    const otpBypass = bypassPhones.has(phone);
+    const currentGroup = groupByPhone.get(phone) ?? null;
+    let eligible = true;
+    let reason = "พร้อมเพิ่มเข้ากลุ่ม";
+
+    if (kycStatus !== "approved" || accountStatus !== "approved") {
+      eligible = false;
+      reason = "ยังไม่ผ่าน KYC หรือบัญชียังไม่พร้อมใช้งาน";
+    } else if (!otpBypass) {
+      eligible = false;
+      reason = "ยังไม่ได้ยกเลิก OTP";
+    } else if (currentGroup?.id === targetGroupId) {
+      eligible = false;
+      reason = "อยู่ในกลุ่มนี้แล้ว";
+    } else if (currentGroup) {
+      eligible = false;
+      reason = `อยู่ในกลุ่ม "${currentGroup.name}" แล้ว`;
+    }
+
+    return {
+      id: String(merchant.id),
+      phone,
+      name: [merchant.first_name, merchant.last_name].filter(Boolean).join(" ").trim() || phone,
+      businessDescription: String(merchant.business_description ?? ""),
+      kycStatus,
+      accountStatus,
+      otpBypass,
+      eligible,
+      reason,
+      currentGroup,
+    };
+  });
 }
