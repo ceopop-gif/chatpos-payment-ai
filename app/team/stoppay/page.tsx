@@ -143,6 +143,11 @@ export default function TeamStopPayPage() {
                 <Store /><span><small>ร้านที่รับเงิน</small><b>{item.merchantName}</b><em>{item.merchantReference}</em></span>
               </div>
 
+              <a className="team-slip-preview" href={"/api/team/stoppay/slip/" + encodeURIComponent(item.caseNumber)} target="_blank" rel="noreferrer">
+                <img src={"/api/team/stoppay/slip/" + encodeURIComponent(item.caseNumber)} alt={"สลิป " + item.caseNumber} />
+                <span>กดดูสลิปขนาดเต็ม</span>
+              </a>
+
               <div className="merchant-stoppay-meta">
                 <span><small>วันเวลาชำระ</small><b>{fmt(item.paidAt)}</b></span>
                 <span><small>ล็อกยอดเมื่อ</small><b>{fmt(item.heldAt)}</b></span>
