@@ -4,6 +4,8 @@ import { useEffect, useState, type FormEvent } from "react";
 import { Eye, EyeOff, KeyRound, LockKeyhole, LogIn, ShieldCheck, Smartphone } from "lucide-react";
 
 export default function AdminLoginPage() {
+  const returnTo = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("returnTo") : null;
+  const safeReturnTo = returnTo && (returnTo.startsWith("/chatposhub") || returnTo.startsWith("/bypass")) ? returnTo : "/admin";
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
