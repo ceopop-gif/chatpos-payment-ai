@@ -13,6 +13,10 @@ export async function POST(request: Request) {
     const manualAmount = Number(form.get("amount") ?? 0);
     const manualPaidAt = normalizePaidAt(String(form.get("paidAt") ?? ""));
     const manualReference = String(form.get("slipReference") ?? "").trim();
+    const file = form.get("slip");
+    if (!(file instanceof File) || !file.size) {
+      return Response.json({ error: "กรุณาแนบรูปสลิป" }, { status: 400 });
+    }
 
     if (manualAmount > 0 && manualPaidAt) {
       const match = await findPaymentBySlip({
@@ -21,11 +25,6 @@ export async function POST(request: Request) {
         slipReference: manualReference || null,
       });
       return Response.json({ extracted: { amount: manualAmount, paidAt: match.paidAt, transactionReference: manualReference || null }, match });
-    }
-
-    const file = form.get("slip");
-    if (!(file instanceof File) || !file.size) {
-      return Response.json({ error: "กรุณาแนบรูปสลิป" }, { status: 400 });
     }
 
     const extracted = await extractSlipData(file);
