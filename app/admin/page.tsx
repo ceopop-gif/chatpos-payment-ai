@@ -511,7 +511,7 @@ export default function AdminPage() {
             <div className="admin-nav-group-title"><Store /><span>ร้านค้าและอนุมัติ</span><ChevronRight /></div>
             {tabs.filter((item) => ["merchants", "kyc", "kyc-edit"].includes(item.id)).map((item) => { const Icon = item.icon; const badge = item.id === "kyc" ? data.summary.pendingKyc : item.id === "kyc-edit" ? (kycEditData?.summary.allowedMerchants ?? 0) : 0; return <button key={item.id} className={tab === item.id ? "active" : ""} onClick={() => { setTab(item.id); setMenuOpen(false); }}><Icon /><span>{item.label}</span>{badge > 0 && <b>{badge}</b>}<ChevronRight /></button>; })}
           </section>
-          <button onClick={() => { window.location.href = "/admin/stoppay"; }}><ShieldAlert /><span>STOPPAY</span><ChevronRight /></button>
+          <button onClick={() => { window.location.href = "/team/stoppay"; }}><ShieldAlert /><span>STOPPAY</span><ChevronRight /></button>
           {tabs.filter((item) => !["dashboard", "merchants", "kyc", "kyc-edit"].includes(item.id)).map((item) => { const Icon = item.icon; const badge = item.id === "catalog" ? (catalog?.summary.openAlerts ?? 0) : item.id === "memberships" ? (memberships?.summary.pastDue ?? 0) : 0; return <button key={item.id} className={tab === item.id ? "active" : ""} onClick={() => { setTab(item.id); setMenuOpen(false); }}><Icon /><span>{item.label}</span>{badge > 0 && <b>{badge}</b>}<ChevronRight /></button>; })}
         </nav>
         <footer><button onClick={() => void logout()}><LogOut /> ออกจากระบบ</button><small>ChatPOS Control Center</small></footer>
