@@ -305,3 +305,12 @@ button { -webkit-tap-highlight-color: transparent; }
   .admin-kyc-edit-entry>span{width:42px;height:42px}
   .admin-kyc-edit-entry strong{font-size:15px}
 }
+
+
+/* MERCHANT APPROVAL NAV GROUP */
+.admin-nav-group{display:grid;gap:6px;margin:4px 0 8px;padding:8px;border:1px solid rgba(255,255,255,.08);border-radius:16px;background:rgba(255,255,255,.035)}
+.admin-nav-group-title{min-height:42px;display:grid;grid-template-columns:28px 1fr 18px;align-items:center;gap:8px;padding:6px 8px;color:#fff;font-size:13px;font-weight:900}
+.admin-nav-group-title>svg:first-child{width:22px}
+.admin-nav-group-title>svg:last-child{width:16px;opacity:.55;transform:rotate(90deg)}
+.admin-nav-group>button{padding-left:14px!important;background:rgba(255,255,255,.025)!important}
+.admin-nav-group>button.active{background:linear-gradient(110deg,rgba(0,174,123,.7),rgba(57,120,233,.65))!important}
