@@ -6,6 +6,7 @@ import {
   moneyToCents,
   sha256Hex,
 } from "../../../lib/chatpos-gateway";
+import { promoteExpiredCasesForMerchant } from "../../../lib/stoppay";
 
 type PayoutRequest = {
   clientRequestId?: string;
@@ -42,6 +43,18 @@ export async function POST(request: Request) {
     }
 
     const db = getD1();
+    await promoteExpiredCasesForMerchant(session.applicationId);
+    const stopPayHold = await db.prepare(
+      "SELECT case_number, status FROM stoppay_cases WHERE merchant_id = ? AND hold_requested_at IS NOT NULL AND resolved_at IS NULL AND status IN ('review_required','refund_review_requested') ORDER BY hold_requested_at ASC LIMIT 1"
+    ).bind(session.applicationId).first();
+    if (stopPayHold) {
+      return Response.json({
+        error: "ร้านมีเคส STOPPAY ครบกำหนด 48 ชั่วโมงและอยู่ระหว่างตรวจสอบ จึงระงับการถอนชั่วคราว",
+        code: "STOPPAY_HOLD",
+        caseNumber: String(stopPayHold.case_number),
+      }, { status: 423 });
+    }
+
     const configRow = await db.prepare(
       "SELECT * FROM chatpos_merchant_configs WHERE merchant_id = ? AND enabled = 1 LIMIT 1"
     ).bind(session.applicationId).first();
