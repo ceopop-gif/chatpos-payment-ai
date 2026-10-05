@@ -70,7 +70,7 @@ export default function KycEditAdminPage() {
   const [notice, setNotice] = useState("");
   const [noteByMerchant, setNoteByMerchant] = useState<Record<string, string>>({});
 
-  const load = useCallback(async (silent = false, query = search) => {
+  const load = useCallback(async (silent = false, query = "") => {
     if (!silent) setLoading(true);
     else setRefreshing(true);
     try {
@@ -92,7 +92,7 @@ export default function KycEditAdminPage() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [search]);
+  }, []);
 
   useEffect(() => {
     void load(false, "");
