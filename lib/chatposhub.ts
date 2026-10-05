@@ -198,10 +198,10 @@ async function activeOtpBypassPhoneSet() {
 export async function searchHubMerchants(searchInput: unknown, targetGroupId = ""): Promise<HubMerchantSearchRow[]> {
   await ensureChatPosHubSchema();
   const db = getD1();
-  const query = String(searchInput ?? "").trim().replace(/\s+/g, " ").slice(0, 80);
-  const digits = query.replace(/\D/g, "").slice(0, 10);
-  const like = `%${query}%`;
-  const phoneLike = digits ? `%${digits}%` : like;
+  const query = String(searchInput ?? "").trim().replace(/\s+/g, " ").toLowerCase().slice(0, 80);
+
+  const bypassPhones = await activeOtpBypassPhoneSet();
+  if (!bypassPhones.size) return [];
 
   const merchants = await db.prepare(`
     WITH latest AS (
@@ -213,17 +213,13 @@ export async function searchHubMerchants(searchInput: unknown, targetGroupId = "
     SELECT id, phone, first_name, last_name, business_description, kyc_status, status, created_at
     FROM latest
     WHERE rn = 1
-      AND (
-        ? = ''
-        OR phone LIKE ?
-        OR first_name LIKE ?
-        OR last_name LIKE ?
-        OR (first_name || ' ' || last_name) LIKE ?
-        OR business_description LIKE ?
-      )
-    ORDER BY created_at DESC
-    LIMIT 100
-  `).bind(query, phoneLike, like, like, like, like).all();
+  `).all();
+
+  const merchantByPhone = new Map<string, Record<string, unknown>>();
+  for (const merchant of merchants.results ?? []) {
+    const phone = normalizeThaiPhone(merchant.phone);
+    if (/^0\d{9}$/.test(phone)) merchantByPhone.set(phone, merchant);
+  }
 
   const activeGroups = await db.prepare(`
     SELECT m.phone, m.group_id, g.name
@@ -231,6 +227,7 @@ export async function searchHubMerchants(searchInput: unknown, targetGroupId = "
     JOIN chatposhub_groups g ON g.id = m.group_id
     WHERE m.status = 'active' AND g.status = 'active'
   `).all();
+
   const groupByPhone = new Map<string, { id: string; name: string }>();
   for (const row of activeGroups.results ?? []) {
     const phone = normalizeThaiPhone(row.phone);
@@ -239,41 +236,61 @@ export async function searchHubMerchants(searchInput: unknown, targetGroupId = "
     }
   }
 
-  const bypassPhones = await activeOtpBypassPhoneSet();
-  return (merchants.results ?? []).map((merchant) => {
-    const phone = normalizeThaiPhone(merchant.phone);
-    const kycStatus = String(merchant.kyc_status ?? "");
-    const accountStatus = String(merchant.status ?? "");
-    const otpBypass = bypassPhones.has(phone);
+  const rows: HubMerchantSearchRow[] = Array.from(bypassPhones).map((phone) => {
+    const merchant = merchantByPhone.get(phone);
     const currentGroup = groupByPhone.get(phone) ?? null;
+    const name = merchant
+      ? [merchant.first_name, merchant.last_name].filter(Boolean).join(" ").trim() || phone
+      : "ยังไม่พบข้อมูลร้าน";
+    const businessDescription = merchant ? String(merchant.business_description ?? "") : "";
+    const kycStatus = merchant ? String(merchant.kyc_status ?? "") : "unknown";
+    const accountStatus = merchant ? String(merchant.status ?? "") : "unknown";
+
     let eligible = true;
     let reason = "พร้อมเพิ่มเข้ากลุ่ม";
 
-    if (kycStatus !== "approved" || accountStatus !== "approved") {
+    if (!merchant) {
       eligible = false;
-      reason = "ยังไม่ผ่าน KYC หรือบัญชียังไม่พร้อมใช้งาน";
-    } else if (!otpBypass) {
-      eligible = false;
-      reason = "ยังไม่ได้ยกเลิก OTP";
+      reason = "ไม่พบข้อมูลร้านใน ChatPOS";
     } else if (currentGroup?.id === targetGroupId) {
       eligible = false;
       reason = "อยู่ในกลุ่มนี้แล้ว";
     } else if (currentGroup) {
       eligible = false;
       reason = `อยู่ในกลุ่ม "${currentGroup.name}" แล้ว`;
+    } else if (kycStatus !== "approved" || accountStatus !== "approved") {
+      eligible = false;
+      reason = "ยังไม่ผ่าน KYC หรือบัญชียังไม่พร้อมใช้งาน";
     }
 
     return {
-      id: String(merchant.id),
+      id: merchant ? String(merchant.id) : `bypass:${phone}`,
       phone,
-      name: [merchant.first_name, merchant.last_name].filter(Boolean).join(" ").trim() || phone,
-      businessDescription: String(merchant.business_description ?? ""),
+      name,
+      businessDescription,
       kycStatus,
       accountStatus,
-      otpBypass,
+      otpBypass: true,
       eligible,
       reason,
       currentGroup,
     };
+  });
+
+  const filtered = query
+    ? rows.filter((row) =>
+        [row.phone, row.name, row.businessDescription, row.currentGroup?.name ?? ""]
+          .join(" ")
+          .toLowerCase()
+          .includes(query),
+      )
+    : rows;
+
+  return filtered.sort((left, right) => {
+    const leftGrouped = left.currentGroup ? 1 : 0;
+    const rightGrouped = right.currentGroup ? 1 : 0;
+    if (leftGrouped !== rightGrouped) return leftGrouped - rightGrouped;
+    if (left.eligible !== right.eligible) return left.eligible ? -1 : 1;
+    return left.phone.localeCompare(right.phone, "th");
   });
 }
