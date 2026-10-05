@@ -4,6 +4,8 @@ import { useEffect, useState, type FormEvent } from "react";
 import { Eye, EyeOff, KeyRound, LockKeyhole, LogIn, ShieldCheck, Smartphone } from "lucide-react";
 
 export default function AdminLoginPage() {
+  const returnTo = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("returnTo") : null;
+  const safeReturnTo = returnTo && (returnTo.startsWith("/chatposhub") || returnTo.startsWith("/bypass")) ? returnTo : "/admin";
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -13,7 +15,7 @@ export default function AdminLoginPage() {
 
   useEffect(() => {
     fetch("/api/admin/login", { cache: "no-store" }).then((response) => {
-      if (response.ok) window.location.replace("/admin");
+      if (response.ok) window.location.replace(safeReturnTo);
       else setChecking(false);
     }).catch(() => setChecking(false));
   }, []);
@@ -34,7 +36,7 @@ export default function AdminLoginPage() {
       });
       const payload = await response.json() as { error?: string };
       if (!response.ok) throw new Error(payload.error || "เข้าสู่ระบบไม่สำเร็จ");
-      window.location.replace("/admin");
+      window.location.replace(safeReturnTo);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "เข้าสู่ระบบไม่สำเร็จ");
       setSubmitting(false);

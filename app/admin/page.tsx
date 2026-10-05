@@ -532,6 +532,18 @@ export default function AdminPage() {
               <ChevronRight />
             </button>
 
+            <a className="admin-kyc-edit-entry" href="/chatposhub">
+              <span><Users /></span>
+              <div><small>CHATPOS HUB</small><strong>จัดการกลุ่มร้านและวงเงิน</strong><p>เพิ่มร้านด้วยเบอร์มือถือ ตรวจ OTP/KYC และกันร้านซ้ำข้ามกลุ่ม</p></div>
+              <ChevronRight />
+            </a>
+
+            <a className="admin-kyc-edit-entry" href="/bypass">
+              <span><ShieldAlert /></span>
+              <div><small>OTP BYPASS</small><strong>ยกเลิก OTP ร้านค้า</strong><p>กำหนดเบอร์ร้านที่ไม่ต้องใช้ OTP ก่อนนำเข้า ChatPOS Hub</p></div>
+              <ChevronRight />
+            </a>
+
             {aiSummary && <section className="admin-ai-center">
               <header>
                 <div className="admin-ai-brand"><span><Sparkles /></span><div><small>CHATPOS AI ANALYST</small><h2>AI ช่วยสรุปหลังบ้าน</h2><p>อ่านข้อมูลจริงและชี้เรื่องสำคัญให้ผู้ดูแล</p></div></div>
