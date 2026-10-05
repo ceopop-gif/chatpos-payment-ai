@@ -1,4 +1,5 @@
 import { getD1 } from "../db";
+import { activeStopPayHoldCents } from "./stoppay";
 
 export const MEMBERSHIP_ACTIVATION_FEE_CENTS = 29_000;
 export const MEMBERSHIP_DAILY_FEE_CENTS = 1_000;
@@ -32,6 +33,7 @@ export type MembershipSnapshot = {
   dailyFee: number;
   outstanding: number;
   balance: number;
+  stopPayHeld: number;
   promptpay: {
     quota: number;
     used: number;
@@ -211,6 +213,7 @@ export async function membershipSnapshot(db: Database, merchantId: string): Prom
   const account = await db.prepare(
     "SELECT available_balance_cents FROM merchant_financial_accounts WHERE merchant_id = ? LIMIT 1"
   ).bind(merchantId).first<{ available_balance_cents: number }>();
+  const stopPayHeldCents = await activeStopPayHoldCents(merchantId);
   const isSubscriber = Boolean(membership && membership.status !== "cancelled");
   const quota = isSubscriber ? Number(membership?.promptpay_quota_cents ?? PROMPTPAY_FREE_QUOTA_CENTS) : 0;
   const used = isSubscriber ? Math.min(quota, Number(membership?.promptpay_used_cents ?? 0)) : 0;
@@ -223,7 +226,8 @@ export async function membershipSnapshot(db: Database, merchantId: string): Prom
     activationFee: Number(membership?.activation_fee_cents ?? MEMBERSHIP_ACTIVATION_FEE_CENTS) / 100,
     dailyFee: Number(membership?.daily_fee_cents ?? MEMBERSHIP_DAILY_FEE_CENTS) / 100,
     outstanding: Number(membership?.outstanding_cents ?? 0) / 100,
-    balance: Number(account?.available_balance_cents ?? 0) / 100,
+    balance: Math.max(0, Number(account?.available_balance_cents ?? 0) - stopPayHeldCents) / 100,
+    stopPayHeld: stopPayHeldCents / 100,
     promptpay: {
       quota: quota / 100,
       used: used / 100,
